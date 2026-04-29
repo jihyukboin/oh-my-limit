@@ -16,6 +16,7 @@ pub(crate) enum TranslatorProviderSelection {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum TranslatorPickerAction {
     SelectedLocal(TranslatorProviderSelection),
+    SelectedOpenAi,
     TestOpenAi { api_key: String },
     InvalidOpenAiApiKey,
 }
@@ -32,6 +33,9 @@ enum TranslatorPickerStage {
 pub(crate) struct TranslatorPicker {
     stage: TranslatorPickerStage,
     selected: usize,
+    has_openai_api_key: bool,
+    local_provider_is_root: bool,
+    openai_api_key_from_provider_list: bool,
 }
 
 impl TranslatorPicker {
@@ -39,6 +43,25 @@ impl TranslatorPicker {
         Self {
             stage: TranslatorPickerStage::Category,
             selected: 0,
+            has_openai_api_key: false,
+            local_provider_is_root: false,
+            openai_api_key_from_provider_list: false,
+        }
+    }
+
+    pub(crate) fn provider_list(active_provider: &str, has_openai_api_key: bool) -> Self {
+        let selected = match active_provider {
+            "local-openai-compatible" => 1,
+            "openai" => 2,
+            _ => 0,
+        };
+
+        Self {
+            stage: TranslatorPickerStage::LocalProvider,
+            selected,
+            has_openai_api_key,
+            local_provider_is_root: true,
+            openai_api_key_from_provider_list: false,
         }
     }
 
@@ -77,11 +100,23 @@ impl TranslatorPicker {
                 let selection = match self.selected {
                     0 => TranslatorProviderSelection::Ollama,
                     1 => TranslatorProviderSelection::LocalOpenAiCompatible,
+                    2 if self.local_provider_is_root => {
+                        if self.has_openai_api_key {
+                            return Some(TranslatorPickerAction::SelectedOpenAi);
+                        }
+                        self.openai_api_key_from_provider_list = true;
+                        self.stage = TranslatorPickerStage::OpenAiApiKey {
+                            value: String::new(),
+                        };
+                        self.selected = 0;
+                        return None;
+                    }
                     _ => TranslatorProviderSelection::Noop,
                 };
                 Some(TranslatorPickerAction::SelectedLocal(selection))
             }
             TranslatorPickerStage::RemoteProvider => {
+                self.openai_api_key_from_provider_list = false;
                 self.stage = TranslatorPickerStage::OpenAiApiKey {
                     value: String::new(),
                 };
@@ -112,13 +147,23 @@ impl TranslatorPicker {
     pub(crate) fn cancel_or_back(&mut self) -> bool {
         match self.stage {
             TranslatorPickerStage::Category => true,
-            TranslatorPickerStage::LocalProvider | TranslatorPickerStage::RemoteProvider => {
+            TranslatorPickerStage::RemoteProvider => {
+                self.stage = TranslatorPickerStage::Category;
+                self.selected = 0;
+                false
+            }
+            TranslatorPickerStage::LocalProvider if self.local_provider_is_root => true,
+            TranslatorPickerStage::LocalProvider => {
                 self.stage = TranslatorPickerStage::Category;
                 self.selected = 0;
                 false
             }
             TranslatorPickerStage::OpenAiApiKey { .. } => {
-                self.stage = TranslatorPickerStage::RemoteProvider;
+                self.stage = if self.openai_api_key_from_provider_list {
+                    TranslatorPickerStage::LocalProvider
+                } else {
+                    TranslatorPickerStage::RemoteProvider
+                };
                 self.selected = 0;
                 false
             }
@@ -150,6 +195,7 @@ impl TranslatorPicker {
     fn visible_len(&self) -> usize {
         match self.stage {
             TranslatorPickerStage::Category => 2,
+            TranslatorPickerStage::LocalProvider if self.local_provider_is_root => 4,
             TranslatorPickerStage::LocalProvider => 3,
             TranslatorPickerStage::RemoteProvider => 1,
             TranslatorPickerStage::OpenAiApiKey { .. } => 0,
@@ -198,12 +244,18 @@ pub(crate) fn draw_translator_picker(frame: &mut Frame<'_>, picker: &TranslatorP
 fn header(picker: &TranslatorPicker) -> Paragraph<'static> {
     let title = match picker.stage {
         TranslatorPickerStage::Category => "Select Translator Type",
+        TranslatorPickerStage::LocalProvider if picker.local_provider_is_root => {
+            "Select Translation Provider"
+        }
         TranslatorPickerStage::LocalProvider => "Select Local Provider",
         TranslatorPickerStage::RemoteProvider => "Select Remote Provider",
         TranslatorPickerStage::OpenAiApiKey { .. } => "OpenAI API Key",
     };
     let subtitle = match picker.stage {
         TranslatorPickerStage::Category => "Choose where prompt translation should run.",
+        TranslatorPickerStage::LocalProvider if picker.local_provider_is_root => {
+            "Choose the provider to enable prompt translation."
+        }
         TranslatorPickerStage::LocalProvider => "Local providers keep prompts on this machine.",
         TranslatorPickerStage::RemoteProvider => {
             "Remote providers send prompts to an external API."
@@ -232,6 +284,15 @@ fn list_items(picker: &TranslatorPicker) -> Vec<ListItem<'static>> {
         TranslatorPickerStage::Category => vec![
             row("1. Local", "Ollama or local OpenAI-compatible server"),
             row("2. Remote", "OpenAI API"),
+        ],
+        TranslatorPickerStage::LocalProvider if picker.local_provider_is_root => vec![
+            row("1. Ollama", "Use a local Ollama model"),
+            row(
+                "2. OpenAI compatible",
+                "Use a local /v1/chat/completions server",
+            ),
+            row("3. OpenAI API", "Use the saved or entered OpenAI API key"),
+            row("4. Off", "Disable prompt translation"),
         ],
         TranslatorPickerStage::LocalProvider => vec![
             row("1. Ollama", "Use a local Ollama model"),

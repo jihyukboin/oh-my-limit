@@ -131,7 +131,7 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
     match command {
         "/help" => {
             app.push_system(
-                "Commands: /help, /status, /account, /usage, /limits, /translator (opens picker), /translator provider <noop|ollama|local-openai-compatible|openai>, /translator model <name>, /translator base-url <url|default>, /translator api-key-env <ENV>, /translator remote <on|off>, /translator test, /diff, /model, /model <name>, /cd <path>, /list, /resume <thread-id>, /review, /compact, /approve, /approve-session, /deny, /cancel, /clear, /new, /interrupt, /exit",
+                "Commands: /help, /status, /account, /usage, /limits, /translator (opens picker), /translator on, /translator off, /translator provider <noop|ollama|local-openai-compatible|openai>, /translator model <name>, /translator base-url <url|default>, /translator api-key-env <ENV>, /translator remote <on|off>, /translator test, /diff, /model, /model <name>, /cd <path>, /list, /resume <thread-id>, /review, /compact, /approve, /approve-session, /deny, /cancel, /clear, /new, /interrupt, /exit",
             );
             app.status = "Help shown.".to_owned();
         }
@@ -293,7 +293,7 @@ async fn translate_for_codex(
     prompt: &str,
 ) -> anyhow::Result<TranslationResponse> {
     let provider = TranslationProviderKind::from_str(&app.config.translation.provider)?;
-    if provider == TranslationProviderKind::Noop {
+    if !app.config.translation.enabled || provider == TranslationProviderKind::Noop {
         return Ok(TranslationResponse {
             text: prompt.to_owned(),
             provider,
@@ -342,13 +342,18 @@ async fn handle_translator_command(app: &mut TuiState, command: &str) {
     let value = parts.next().unwrap_or_default().trim();
 
     let result = match key {
+        "on" if value.is_empty() => {
+            open_translator_provider_picker(app);
+            return;
+        }
+        "off" if value.is_empty() => set_translation_enabled(app, false),
         "provider" => set_translator_provider(app, value),
         "model" => set_optional_translation_value(app, "model", value),
         "base-url" => set_optional_translation_value(app, "base-url", value),
         "api-key-env" => set_optional_translation_value(app, "api-key-env", value),
         "remote" => set_remote_translation(app, value),
         "test" if value.is_empty() => test_translator(app).await,
-        _ => Err("Usage: /translator provider <noop|ollama|local-openai-compatible|openai>, /translator model <name>, /translator base-url <url|default>, /translator api-key-env <ENV>, /translator remote <on|off>, /translator test".to_owned()),
+        _ => Err("Usage: /translator on, /translator off, /translator provider <noop|ollama|local-openai-compatible|openai>, /translator model <name>, /translator base-url <url|default>, /translator api-key-env <ENV>, /translator remote <on|off>, /translator test".to_owned()),
     };
 
     match result {
@@ -371,6 +376,18 @@ fn open_translator_picker(app: &mut TuiState) {
     app.status = "Select a translator and settings.".to_owned();
 }
 
+fn open_translator_provider_picker(app: &mut TuiState) {
+    if app.model_picker.is_some() {
+        app.model_picker = None;
+    }
+
+    app.translator_picker = Some(TranslatorPicker::provider_list(
+        &app.config.translation.provider,
+        has_openai_api_key(app),
+    ));
+    app.status = "Select a translator provider to enable.".to_owned();
+}
+
 pub(super) async fn apply_translator_selection(
     app: &mut TuiState,
     selection: TranslatorPickerAction,
@@ -382,18 +399,48 @@ pub(super) async fn apply_translator_selection(
                 "OpenAI API key looks incomplete. Paste the full key and press Enter.".to_owned();
             return Ok(());
         }
-        TranslatorPickerAction::SelectedLocal(selection) => {
-            app.config.translation.provider = match selection {
-                TranslatorProviderSelection::Noop => TranslationProviderKind::Noop.as_str(),
-                TranslatorProviderSelection::Ollama => TranslationProviderKind::Ollama.as_str(),
-                TranslatorProviderSelection::LocalOpenAiCompatible => {
-                    TranslationProviderKind::LocalOpenAiCompatible.as_str()
-                }
+        TranslatorPickerAction::SelectedLocal(selection) => match selection {
+            TranslatorProviderSelection::Noop => app.config.translation.enabled = false,
+            TranslatorProviderSelection::Ollama => {
+                app.config.translation.enabled = true;
+                app.config.translation.provider =
+                    TranslationProviderKind::Ollama.as_str().to_owned();
+                app.config.privacy.remote_translation_allowed = false;
+                app.config.translation.api_key_env = None;
+                app.openai_api_key = None;
             }
-            .to_owned();
-            app.config.privacy.remote_translation_allowed = false;
-            app.config.translation.api_key_env = None;
-            app.openai_api_key = None;
+            TranslatorProviderSelection::LocalOpenAiCompatible => {
+                app.config.translation.enabled = true;
+                app.config.translation.provider = TranslationProviderKind::LocalOpenAiCompatible
+                    .as_str()
+                    .to_owned();
+                app.config.privacy.remote_translation_allowed = false;
+                app.config.translation.api_key_env = None;
+                app.openai_api_key = None;
+            }
+        },
+        TranslatorPickerAction::SelectedOpenAi => {
+            app.config.translation.enabled = true;
+            app.config.translation.provider = TranslationProviderKind::OpenAi.as_str().to_owned();
+            app.config.privacy.remote_translation_allowed = true;
+            app.config.translation.model = app
+                .config
+                .translation
+                .model
+                .clone()
+                .or_else(|| Some("gpt-5.4-mini".to_owned()));
+            app.config.translation.base_url = app
+                .config
+                .translation
+                .base_url
+                .clone()
+                .or_else(|| Some("https://api.openai.com/v1".to_owned()));
+            app.config.translation.api_key_env = app
+                .config
+                .translation
+                .api_key_env
+                .clone()
+                .or_else(|| Some("OPENAI_API_KEY".to_owned()));
         }
         TranslatorPickerAction::TestOpenAi { api_key } => {
             let model = app
@@ -411,6 +458,7 @@ pub(super) async fn apply_translator_selection(
             test_openai_api_key(app, api_key.clone(), model.clone(), base_url.clone()).await?;
 
             app.config.translation.provider = TranslationProviderKind::OpenAi.as_str().to_owned();
+            app.config.translation.enabled = true;
             app.config.privacy.remote_translation_allowed = true;
             app.config.translation.model = model;
             app.config.translation.base_url = base_url;
@@ -439,9 +487,16 @@ pub(super) async fn apply_translator_selection(
     save_config(&app.config, &app.config_path)?;
     app.translator_picker = None;
 
-    let provider = app.config.translation.provider.clone();
-    app.push_system(format!("Translator provider set to {provider}."));
-    app.status = format!("Translator provider set to {provider}.");
+    let message = if app.config.translation.enabled {
+        format!(
+            "Prompt translation enabled with {}.",
+            app.config.translation.provider
+        )
+    } else {
+        "Prompt translation disabled.".to_owned()
+    };
+    app.push_system(message.clone());
+    app.status = message;
 
     Ok(())
 }
@@ -449,6 +504,7 @@ pub(super) async fn apply_translator_selection(
 fn set_translator_provider(app: &mut TuiState, value: &str) -> Result<String, String> {
     let provider = TranslationProviderKind::from_str(value).map_err(|error| error.to_string())?;
     app.config.translation.provider = provider.as_str().to_owned();
+    app.config.translation.enabled = provider != TranslationProviderKind::Noop;
 
     if provider == TranslationProviderKind::OpenAi {
         app.config.translation.model = app
@@ -475,6 +531,15 @@ fn set_translator_provider(app: &mut TuiState, value: &str) -> Result<String, St
     Ok(format!(
         "Translator provider set to {}.",
         app.config.translation.provider
+    ))
+}
+
+fn set_translation_enabled(app: &mut TuiState, enabled: bool) -> Result<String, String> {
+    app.config.translation.enabled = enabled;
+    save_config(&app.config, &app.config_path)?;
+    Ok(format!(
+        "Prompt translation {}.",
+        if enabled { "enabled" } else { "disabled" }
     ))
 }
 
@@ -516,6 +581,16 @@ fn set_remote_translation(app: &mut TuiState, value: &str) -> Result<String, Str
         "Remote translation {}.",
         if enabled { "enabled" } else { "disabled" }
     ))
+}
+
+fn has_openai_api_key(app: &TuiState) -> bool {
+    app.openai_api_key.is_some()
+        || app
+            .config
+            .translation
+            .api_key_env
+            .as_ref()
+            .is_some_and(|name| app.env_values.contains_key(name))
 }
 
 async fn test_translator(app: &mut TuiState) -> Result<String, String> {

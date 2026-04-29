@@ -225,8 +225,10 @@ impl TuiState {
             "unset"
         };
         format!(
-            "translator: {}; model: {model}; base_url: {base_url}; api_key_env: {api_key_env}; api_key: {api_key}; remote_allowed: {}",
-            translation.provider, self.config.privacy.remote_translation_allowed
+            "translator: {}; enabled: {}; model: {model}; base_url: {base_url}; api_key_env: {api_key_env}; api_key: {api_key}; remote_allowed: {}",
+            translation.provider,
+            translation.enabled,
+            self.config.privacy.remote_translation_allowed
         )
     }
 

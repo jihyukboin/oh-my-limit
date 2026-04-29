@@ -7,6 +7,18 @@ pub(super) fn insert_input(app: &mut TuiState, character: char) {
     app.sync_slash_popup();
 }
 
+pub(super) fn insert_input_text(app: &mut TuiState, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+
+    let cursor = app.input_cursor.min(app.input.len());
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    app.input.insert_str(cursor, &text);
+    app.input_cursor = cursor + text.len();
+    app.sync_slash_popup();
+}
+
 pub(super) fn backspace_input(app: &mut TuiState) {
     let Some(previous) = previous_char_boundary(&app.input, app.input_cursor) else {
         return;
@@ -66,4 +78,31 @@ fn next_char_boundary(text: &str, cursor: usize) -> Option<usize> {
         .nth(1)
         .map(|(index, _)| cursor + index)
         .or(Some(text.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_input_text_inserts_at_cursor() {
+        let mut app = TuiState::new();
+        app.input = "hello world".to_owned();
+        app.input_cursor = "hello ".len();
+
+        insert_input_text(&mut app, "pasted ");
+
+        assert_eq!(app.input, "hello pasted world");
+        assert_eq!(app.input_cursor, "hello pasted ".len());
+    }
+
+    #[test]
+    fn insert_input_text_normalizes_carriage_returns() {
+        let mut app = TuiState::new();
+
+        insert_input_text(&mut app, "a\r\nb\rc");
+
+        assert_eq!(app.input, "a\nb\nc");
+        assert_eq!(app.input_cursor, app.input.len());
+    }
 }

@@ -13,6 +13,7 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TranslationConfig {
+    pub enabled: bool,
     pub provider: String,
     pub model: Option<String>,
     pub base_url: Option<String>,
@@ -34,6 +35,7 @@ pub struct PrivacyConfig {
 impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             provider: "noop".to_owned(),
             model: None,
             base_url: None,

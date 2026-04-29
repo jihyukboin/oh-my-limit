@@ -15,8 +15,8 @@ use commands::{
     apply_model_selection, apply_translator_selection, connect, interrupt_turn, submit_input,
 };
 use composer::{
-    backspace_input, delete_input, insert_input, move_input_cursor_left, move_input_cursor_right,
-    move_input_cursor_to_line_end, move_input_cursor_to_line_start,
+    backspace_input, delete_input, insert_input, insert_input_text, move_input_cursor_left,
+    move_input_cursor_right, move_input_cursor_to_line_end, move_input_cursor_to_line_start,
 };
 use crossterm::{
     event::{
@@ -288,6 +288,8 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                         && picker.is_api_key_input()
                     {
                         picker.push_api_key_text(&pasted);
+                    } else if app.model_picker.is_none() && app.translator_picker.is_none() {
+                        insert_input_text(&mut app, &pasted);
                     }
                 }
                 _ => {}

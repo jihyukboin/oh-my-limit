@@ -119,6 +119,10 @@ fn model_summary(app: &TuiState) -> String {
 }
 
 fn translator_source_label(app: &TuiState) -> String {
+    if !app.config.translation.enabled {
+        return "translator off".to_owned();
+    }
+
     let provider = app.config.translation.provider.as_str();
     let location = match provider {
         "openai" => "remote",

@@ -32,6 +32,8 @@ Provider settings are changed from the TUI:
 complete, Enter to run the selected command, and Esc to dismiss.
 
 Direct commands remain available:
+/translator on
+/translator off
 /translator provider <noop|ollama|local-openai-compatible|openai>
 /translator model <model>
 /translator base-url <url|default>
@@ -48,6 +50,7 @@ explicitly enabled:
 
 ```toml
 [translation]
+enabled = true
 provider = "openai"
 model = "gpt-5.4-mini"
 base_url = "https://api.openai.com/v1"

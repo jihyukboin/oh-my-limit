@@ -1,0 +1,18 @@
+[runner]
+primary = "app-server"
+fallback = "exec"
+transport = "stdio"
+experimental_api = false
+
+[translation]
+provider = "ollama"
+input_language = "ko"
+output_language = "ko"
+fail_closed = true
+
+[usage_gate]
+enabled = true
+skip_below_prompt_tokens = 120
+min_absolute_prompt_tokens_saved = 80
+min_prompt_reduction_ratio = 0.20
+

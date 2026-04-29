@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
+      - name: Check formatting
+        run: cargo +1.95.0 fmt --all -- --check
+      - name: Lint
+        run: cargo +1.95.0 clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo +1.95.0 test --workspace
+

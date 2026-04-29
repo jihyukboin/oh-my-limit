@@ -1,0 +1,17 @@
+/target/
+/.idea/
+/.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Local runtime state
+/.local/
+/.oh-my-limit/
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated release artifacts
+/dist/
+/coverage/

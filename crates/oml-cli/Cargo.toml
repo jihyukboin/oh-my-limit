@@ -1,0 +1,20 @@
+[package]
+name = "oh-my-limit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "oh-my-limit"
+path = "src/main.rs"
+
+[dependencies]
+oml-codex-appserver = { path = "../oml-codex-appserver" }
+oml-config = { path = "../oml-config" }
+oml-core = { path = "../oml-core" }
+
+[lints]
+workspace = true

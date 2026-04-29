@@ -120,11 +120,7 @@ fn token_usage_row(label: &'static str, usage: Option<super::app::TokenUsage>) -
             format_token_count(usage.cached),
             format_token_count(usage.output),
         ),
-        None => (
-            "pending".to_owned(),
-            "pending".to_owned(),
-            "pending".to_owned(),
-        ),
+        None => ("0".to_owned(), "0".to_owned(), "0".to_owned()),
     };
 
     Row::new(vec![

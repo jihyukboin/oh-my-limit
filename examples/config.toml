@@ -15,8 +15,9 @@ timeout_ms = 30000
 
 # OpenAI API is opt-in. Do not store the raw API key here.
 # provider = "openai"
-# model = "gpt-4.1-mini"
+# model = "gpt-5.4-mini"
 # base_url = "https://api.openai.com/v1"
+# The key itself is read from ~/.oh-my-limit/.env.
 # api_key_env = "OPENAI_API_KEY"
 
 [privacy]

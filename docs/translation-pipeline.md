@@ -42,18 +42,23 @@ Direct commands remain available:
 
 Remote OpenAI translation is opt-in. The config stores the environment variable
 name, not the raw API key. When the key is entered through the picker, it is
-kept in memory for the current TUI session and validated with one OpenAI API
-call before OpenAI translation is enabled. The OpenAI provider refuses to run
-until remote translation is explicitly enabled:
+validated with one OpenAI API call and then saved to `~/.oh-my-limit/.env` as
+`OPENAI_API_KEY`. The OpenAI provider refuses to run until remote translation is
+explicitly enabled:
 
 ```toml
 [translation]
 provider = "openai"
-model = "gpt-4.1-mini"
+model = "gpt-5.4-mini"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 fail_closed = true
 
 [privacy]
 remote_translation_allowed = true
+```
+
+```text
+# ~/.oh-my-limit/.env
+OPENAI_API_KEY=sk-...
 ```

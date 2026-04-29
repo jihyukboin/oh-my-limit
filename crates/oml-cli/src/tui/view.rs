@@ -189,6 +189,23 @@ fn draw_transcript(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
             text.lines()
                 .map(|line| Line::from(format!("  {line}")).style(line_style)),
         );
+        if entry.role == TranscriptRole::User
+            && let Some(translated_text) = entry.translated_text.as_ref()
+        {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    "translated",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.extend(translated_text.lines().map(|line| {
+                Line::from(format!("  {line}"))
+                    .style(Style::default().fg(Color::Gray).bg(USER_MESSAGE_BG))
+            }));
+        }
         lines.push(Line::from(""));
     }
 

@@ -229,7 +229,9 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                     }
                     KeyCode::Enter if app.slash_popup.is_some() => {
                         accept_slash_command(&mut app);
-                        submit_input(&mut client, &mut app).await;
+                        if let Err(error) = submit_input(&mut client, &mut app, terminal).await {
+                            app.status = format!("Input submit failed: {error}");
+                        }
                         if app.should_exit {
                             break;
                         }
@@ -251,7 +253,9 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                         insert_input(&mut app, '\n');
                     }
                     KeyCode::Enter => {
-                        submit_input(&mut client, &mut app).await;
+                        if let Err(error) = submit_input(&mut client, &mut app, terminal).await {
+                            app.status = format!("Input submit failed: {error}");
+                        }
                         if app.should_exit {
                             break;
                         }

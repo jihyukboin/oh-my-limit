@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env, io,
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
@@ -7,11 +7,12 @@ use std::{
 };
 
 use oml_codex_appserver::client::AppServerClient;
-use oml_config::config::AppConfig;
+use oml_config::{config::AppConfig, env_file::save_env_value};
 use oml_translation::translator::{
     TranslationDirection, TranslationProviderKind, TranslationRequest, TranslatorConfig,
     build_translator,
 };
+use ratatui::{Terminal, backend::CrosstermBackend};
 use serde_json::{Value, json};
 
 use super::{
@@ -19,6 +20,7 @@ use super::{
     limits::{rate_limit_summary, rate_limit_usage},
     model_picker::{ModelPicker, ModelSelection, parse_model_options, reasoning_effort_label},
     translator_picker::{TranslatorPicker, TranslatorPickerAction, TranslatorProviderSelection},
+    view::draw,
 };
 
 pub(super) async fn connect(app: &mut TuiState) -> anyhow::Result<AppServerClient> {
@@ -44,48 +46,56 @@ pub(super) async fn connect(app: &mut TuiState) -> anyhow::Result<AppServerClien
     Ok(client)
 }
 
-pub(super) async fn submit_input(client: &mut AppServerClient, app: &mut TuiState) {
+pub(super) async fn submit_input(
+    client: &mut AppServerClient,
+    app: &mut TuiState,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> io::Result<()> {
     let prompt = app.input.trim().to_owned();
     if prompt.is_empty() {
-        return;
+        return Ok(());
     }
 
     if prompt.starts_with('/') {
         app.input.clear();
         app.input_cursor = 0;
         handle_slash_command(client, app, &prompt).await;
-        return;
+        return Ok(());
     }
 
     if app.active_turn_id.is_some() {
         app.status = "Codex is still responding. Wait for this turn to finish.".to_owned();
-        return;
+        return Ok(());
     }
 
     let Some(thread_id) = app.thread_id.clone() else {
         app.status = "Codex thread is not ready yet.".to_owned();
-        return;
-    };
-
-    let codex_prompt = match translate_for_codex(app, &prompt).await {
-        Ok(codex_prompt) => codex_prompt,
-        Err(error) => {
-            app.status = format!("Translation failed: {error}");
-            return;
-        }
+        return Ok(());
     };
 
     app.input.clear();
     app.input_cursor = 0;
     app.push_user(prompt.clone());
-    if codex_prompt != prompt {
-        app.push_system(format!(
-            "Translated prompt with {} before sending to Codex.",
-            app.config.translation.provider
-        ));
-    }
     app.start_assistant_message();
-    app.status = "Sending to Codex...".to_owned();
+    app.status = "Translating prompt...".to_owned();
+    terminal.draw(|frame| draw(frame, app))?;
+
+    let codex_prompt = match translate_for_codex(app, &prompt).await {
+        Ok(codex_prompt) => codex_prompt,
+        Err(error) => {
+            app.status = format!("Translation failed: {error}");
+            app.replace_last_assistant_message(format!("Translation failed: {error}"));
+            return Ok(());
+        }
+    };
+
+    if codex_prompt != prompt {
+        app.set_last_user_translation(codex_prompt.clone());
+        app.status = "Sending translated prompt to Codex...".to_owned();
+        terminal.draw(|frame| draw(frame, app))?;
+    } else {
+        app.status = "Sending to Codex...".to_owned();
+    }
 
     let cwd = app.cwd.to_string_lossy().into_owned();
     match client
@@ -104,8 +114,11 @@ pub(super) async fn submit_input(client: &mut AppServerClient, app: &mut TuiStat
         }
         Err(error) => {
             app.status = format!("Failed to start turn: {error}");
+            app.replace_last_assistant_message(format!("Failed to start turn: {error}"));
         }
     }
+
+    Ok(())
 }
 
 async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, command: &str) {
@@ -365,7 +378,7 @@ pub(super) async fn apply_translator_selection(
                 .translation
                 .model
                 .clone()
-                .or_else(|| Some("gpt-4.1-mini".to_owned()));
+                .or_else(|| Some("gpt-5.4-mini".to_owned()));
             let base_url = app
                 .config
                 .translation
@@ -384,6 +397,14 @@ pub(super) async fn apply_translator_selection(
     }
 
     if test_on_apply {
+        if let Some(api_key) = app.openai_api_key.as_deref() {
+            save_env_value(&app.env_path, "OPENAI_API_KEY", api_key)
+                .map_err(|error| format!("Failed to save env file: {error}"))?;
+            app.env_values
+                .insert("OPENAI_API_KEY".to_owned(), api_key.to_owned());
+            app.config.translation.api_key_env = Some("OPENAI_API_KEY".to_owned());
+            app.openai_api_key = None;
+        }
         save_config(&app.config, &app.config_path)?;
         app.translator_picker = None;
         let message = "Translator test passed: openai (OpenAI API reachable)".to_owned();
@@ -412,7 +433,7 @@ fn set_translator_provider(app: &mut TuiState, value: &str) -> Result<String, St
             .translation
             .model
             .clone()
-            .or_else(|| Some("gpt-4.1-mini".to_owned()));
+            .or_else(|| Some("gpt-5.4-mini".to_owned()));
         app.config.translation.base_url = app
             .config
             .translation
@@ -522,6 +543,11 @@ fn translator_config(app: &TuiState) -> anyhow::Result<TranslatorConfig> {
         app.config.translation.api_key_env.as_ref(),
     ) {
         (TranslationProviderKind::OpenAi, Some(key), _) => Some(key.clone()),
+        (TranslationProviderKind::OpenAi, None, Some(name))
+            if app.env_values.contains_key(name) =>
+        {
+            app.env_values.get(name).cloned()
+        }
         (TranslationProviderKind::OpenAi, None, Some(name)) => Some(
             env::var(name)
                 .map_err(|_| anyhow::anyhow!("environment variable {name} is not set"))?,
@@ -529,7 +555,11 @@ fn translator_config(app: &TuiState) -> anyhow::Result<TranslatorConfig> {
         (TranslationProviderKind::OpenAi, None, None) => {
             anyhow::bail!("OpenAI provider requires an API key from /translator or api-key-env")
         }
-        (_, _, Some(name)) => env::var(name).ok(),
+        (_, _, Some(name)) => app
+            .env_values
+            .get(name)
+            .cloned()
+            .or_else(|| env::var(name).ok()),
         (_, _, None) => None,
     };
 

@@ -35,7 +35,7 @@ impl RemoteOpenAiCompatibleTranslator {
     }
 
     fn model(&self) -> &str {
-        self.config.model.as_deref().unwrap_or("gpt-4.1-mini")
+        self.config.model.as_deref().unwrap_or("gpt-5.4-mini")
     }
 
     fn api_key(&self) -> Result<&str> {

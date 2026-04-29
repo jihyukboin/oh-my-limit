@@ -1,7 +1,11 @@
 use std::{path::PathBuf, time::Instant};
 
 use oml_codex_appserver::client::AccountSummary;
-use oml_config::{config::AppConfig, paths::config_file};
+use oml_config::{
+    config::AppConfig,
+    env_file::load_env_file,
+    paths::{config_file, env_file},
+};
 use serde_json::Value;
 
 use super::model_picker::ModelPicker;
@@ -18,7 +22,9 @@ pub(super) struct TuiState {
     pub(super) model: Option<String>,
     pub(super) reasoning_effort: Option<String>,
     pub(super) config_path: PathBuf,
+    pub(super) env_path: PathBuf,
     pub(super) config: AppConfig,
+    pub(super) env_values: std::collections::HashMap<String, String>,
     pub(super) openai_api_key: Option<String>,
     pub(super) input: String,
     pub(super) input_cursor: usize,
@@ -43,6 +49,7 @@ pub(super) struct RateLimitUsage {
 pub(super) struct TranscriptEntry {
     pub(super) role: TranscriptRole,
     pub(super) text: String,
+    pub(super) translated_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -62,6 +69,7 @@ pub(super) struct PendingApproval {
 impl TuiState {
     pub(super) fn new() -> Self {
         let config_path = config_file();
+        let env_path = env_file();
         let (config, config_status) = match AppConfig::load_or_default(&config_path) {
             Ok(config) => (config, None),
             Err(error) => (
@@ -69,6 +77,16 @@ impl TuiState {
                 Some(format!("Config load failed: {error}")),
             ),
         };
+        let (env_values, env_status) = match load_env_file(&env_path) {
+            Ok(env_values) => (env_values, None),
+            Err(error) => (
+                std::collections::HashMap::new(),
+                Some(format!("Env load failed: {error}")),
+            ),
+        };
+        let status = env_status
+            .or(config_status)
+            .unwrap_or_else(|| "Connecting to Codex app-server...".to_owned());
 
         Self {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -79,11 +97,13 @@ impl TuiState {
             model: None,
             reasoning_effort: None,
             config_path,
+            env_path,
             config,
+            env_values,
             openai_api_key: None,
             input: String::new(),
             input_cursor: 0,
-            status: config_status.unwrap_or_else(|| "Connecting to Codex app-server...".to_owned()),
+            status,
             transcript: Vec::new(),
             usage: None,
             rate_limits: RateLimitUsage::default(),
@@ -99,20 +119,42 @@ impl TuiState {
         self.transcript.push(TranscriptEntry {
             role: TranscriptRole::System,
             text: text.into(),
+            translated_text: None,
         });
     }
 
     pub(super) fn push_user(&mut self, text: String) {
+        self.push_user_with_translation(text, None);
+    }
+
+    pub(super) fn push_user_with_translation(
+        &mut self,
+        text: String,
+        translated_text: Option<String>,
+    ) {
         self.transcript.push(TranscriptEntry {
             role: TranscriptRole::User,
             text,
+            translated_text,
         });
+    }
+
+    pub(super) fn set_last_user_translation(&mut self, translated_text: String) {
+        if let Some(entry) = self
+            .transcript
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.role == TranscriptRole::User)
+        {
+            entry.translated_text = Some(translated_text);
+        }
     }
 
     pub(super) fn start_assistant_message(&mut self) {
         self.transcript.push(TranscriptEntry {
             role: TranscriptRole::Assistant,
             text: String::new(),
+            translated_text: None,
         });
     }
 
@@ -143,6 +185,7 @@ impl TuiState {
         self.transcript.push(TranscriptEntry {
             role: TranscriptRole::Assistant,
             text,
+            translated_text: None,
         });
     }
 

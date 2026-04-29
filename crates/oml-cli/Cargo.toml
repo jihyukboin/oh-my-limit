@@ -9,12 +9,18 @@ homepage.workspace = true
 
 [[bin]]
 name = "oh-my-limit"
-path = "src/main.rs"
+path = "src/bin/oh-my-limit.rs"
+
+[[bin]]
+name = "oml"
+path = "src/bin/oml.rs"
 
 [dependencies]
 oml-codex-appserver = { path = "../oml-codex-appserver" }
 oml-config = { path = "../oml-config" }
 oml-core = { path = "../oml-core" }
+crossterm.workspace = true
+ratatui.workspace = true
 
 [lints]
 workspace = true

@@ -1,8 +1,9 @@
 mod commands;
+pub mod tui;
 
-fn main() {
+pub fn run() {
     let mut args = std::env::args().skip(1);
-    let command = args.next().unwrap_or_else(|| "help".to_owned());
+    let command = args.next().unwrap_or_else(|| "codex".to_owned());
 
     match command.as_str() {
         "doctor" => commands::doctor::run(),

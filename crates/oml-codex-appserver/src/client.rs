@@ -237,18 +237,18 @@ impl AppServerClient {
             match method {
                 Some("item/agentMessage/delta") => {
                     let params = message.get("params").unwrap_or(&Value::Null);
-                    if params.get("turnId").and_then(Value::as_str) == Some(turn_id) {
-                        if let Some(delta) = params.get("delta").and_then(Value::as_str) {
-                            answer.push_str(delta);
-                        }
+                    if params.get("turnId").and_then(Value::as_str) == Some(turn_id)
+                        && let Some(delta) = params.get("delta").and_then(Value::as_str)
+                    {
+                        answer.push_str(delta);
                     }
                 }
                 Some("item/completed") => {
                     let params = message.get("params").unwrap_or(&Value::Null);
-                    if params.get("turnId").and_then(Value::as_str) == Some(turn_id) {
-                        if let Some(item_answer) = completed_agent_answer(params) {
-                            completed_item_answer = Some(item_answer);
-                        }
+                    if params.get("turnId").and_then(Value::as_str) == Some(turn_id)
+                        && let Some(item_answer) = completed_agent_answer(params)
+                    {
+                        completed_item_answer = Some(item_answer);
                     }
                 }
                 Some("turn/completed") => {

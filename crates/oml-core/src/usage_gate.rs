@@ -3,4 +3,3 @@ pub enum UsageDecision {
     Bridge,
     Skip,
 }
-

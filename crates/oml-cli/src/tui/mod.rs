@@ -5,7 +5,7 @@ pub mod panels;
 
 use std::{
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
 };
@@ -212,10 +212,8 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                     KeyCode::Backspace => {
                         app.input.pop();
                     }
-                    KeyCode::Char(character) => {
-                        if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                            app.input.push(character);
-                        }
+                    KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.input.push(character);
                     }
                     _ => {}
                 },
@@ -235,10 +233,10 @@ async fn connect(app: &mut TuiState) -> anyhow::Result<AppServerClient> {
     let account = client.account_read().await?;
     app.account = Some(account);
 
-    if let Ok(result) = client.account_rate_limits_read().await {
-        if let Some(rate_limits) = rate_limit_usage(&result) {
-            app.rate_limits = rate_limits;
-        }
+    if let Ok(result) = client.account_rate_limits_read().await
+        && let Some(rate_limits) = rate_limit_usage(&result)
+    {
+        app.rate_limits = rate_limits;
     }
 
     let cwd = app.cwd.to_string_lossy().into_owned();
@@ -434,7 +432,7 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
     }
 }
 
-fn resolve_cwd(current: &PathBuf, path: &str) -> Result<PathBuf, String> {
+fn resolve_cwd(current: &Path, path: &str) -> Result<PathBuf, String> {
     if path.is_empty() {
         return Err("Usage: /cd <path>".to_owned());
     }
@@ -711,18 +709,18 @@ fn handle_app_server_message(app: &mut TuiState, message: &Value) {
     match message.get("method").and_then(Value::as_str) {
         Some("item/agentMessage/delta") => {
             let params = message.get("params").unwrap_or(&Value::Null);
-            if belongs_to_active_turn(app, params) {
-                if let Some(delta) = params.get("delta").and_then(Value::as_str) {
-                    app.append_assistant_delta(delta);
-                }
+            if belongs_to_active_turn(app, params)
+                && let Some(delta) = params.get("delta").and_then(Value::as_str)
+            {
+                app.append_assistant_delta(delta);
             }
         }
         Some("item/completed") => {
             let params = message.get("params").unwrap_or(&Value::Null);
-            if belongs_to_active_turn(app, params) {
-                if let Some(text) = completed_agent_answer(params) {
-                    app.replace_last_assistant_message(text);
-                }
+            if belongs_to_active_turn(app, params)
+                && let Some(text) = completed_agent_answer(params)
+            {
+                app.replace_last_assistant_message(text);
             }
         }
         Some("turn/completed") => {
@@ -1017,6 +1015,7 @@ fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, perc
     let label = percent
         .map(|percent| format!("{title} {percent}%"))
         .unwrap_or_else(|| format!("{title} pending"));
+    let remaining_percent = percent.map(|percent| 100 - percent).unwrap_or_default();
     let gauge = Gauge::default()
         .block(Block::default().title(title).borders(Borders::ALL))
         .gauge_style(
@@ -1025,7 +1024,7 @@ fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, perc
                 .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
         )
-        .percent(percent.unwrap_or_default())
+        .percent(remaining_percent)
         .label(Span::raw(label));
     frame.render_widget(gauge, area);
 }

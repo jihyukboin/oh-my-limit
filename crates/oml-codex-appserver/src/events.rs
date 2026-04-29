@@ -2,4 +2,3 @@
 pub enum BridgeEvent {
     Unknown,
 }
-

@@ -3,4 +3,3 @@ pub enum TranslationDirection {
     KoreanToEnglish,
     EnglishToKorean,
 }
-

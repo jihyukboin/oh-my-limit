@@ -4,4 +4,3 @@ pub enum ApprovalDecision {
     Decline,
     Cancel,
 }
-

@@ -2,4 +2,3 @@
 pub struct AppServerError {
     pub message: String,
 }
-

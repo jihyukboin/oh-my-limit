@@ -4,4 +4,3 @@ pub enum AccountKind {
     ApiKey,
     Unknown,
 }
-

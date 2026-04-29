@@ -7,6 +7,24 @@
 - Stable Rust version: 1.95.0
 - Release date: 2026-04-16
 - Installation method: rustup
+- Rust tool binaries live under `~/.cargo/bin`. If `cargo` is not found in a Codex shell, use `/Users/jung/.cargo/bin/cargo` and verify the shell profile PATH instead of assuming Rust is missing.
+- The Cargo package for `crates/oml-cli` is `oh-my-limit`, not `oml-cli`. Use `cargo metadata` or `crates/oml-cli/Cargo.toml` before running `cargo check -p ...`, `cargo clippy -p ...`, or package-specific commands.
+
+## Commands
+
+- `/Users/jung/.cargo/bin/cargo fmt` — Rust formatter
+- `/Users/jung/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` — Rust linter, equivalent in role to `imgobot-web`'s `npx eslint . --quiet` quality gate: quiet on success, non-zero exit on warnings/errors
+- `/Users/jung/.cargo/bin/cargo install --path crates/oml-cli --force` — rebuild and replace the global `oh-my-limit` and `oml` executables from the current checkout
+
+## Definition of Done
+
+For any turn that changes Rust source, CLI behavior, or this repository's agent instructions, run these exactly once before the final response:
+
+1. `/Users/jung/.cargo/bin/cargo fmt`
+2. `/Users/jung/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings`
+3. `/Users/jung/.cargo/bin/cargo install --path crates/oml-cli --force`
+
+Report any skipped command with the concrete reason. Do not use `cargo check -p oml-cli`; the package name is `oh-my-limit`.
 
 ## Serena MCP — Prefer Over Built-in Tools for Code Operations (when available)
 

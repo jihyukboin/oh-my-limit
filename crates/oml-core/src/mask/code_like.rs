@@ -3,4 +3,3 @@ pub struct ProtectedSpan {
     pub start: usize,
     pub end: usize,
 }
-

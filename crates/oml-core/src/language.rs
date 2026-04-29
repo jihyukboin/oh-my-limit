@@ -4,4 +4,3 @@ pub enum Language {
     English,
     Unknown,
 }
-

@@ -113,7 +113,7 @@ impl AppServerClient {
     }
 
     pub async fn turn_start(&mut self, thread_id: &str, cwd: &str, prompt: &str) -> Result<String> {
-        self.turn_start_with_model(thread_id, cwd, prompt, None)
+        self.turn_start_with_model(thread_id, cwd, prompt, None, None)
             .await
     }
 
@@ -123,6 +123,7 @@ impl AppServerClient {
         cwd: &str,
         prompt: &str,
         model: Option<&str>,
+        effort: Option<&str>,
     ) -> Result<String> {
         let result = self
             .transport
@@ -138,6 +139,7 @@ impl AppServerClient {
                         }
                     ],
                     "model": model,
+                    "effort": effort,
                 }),
             )
             .await?;
@@ -162,6 +164,17 @@ impl AppServerClient {
     pub async fn account_rate_limits_read(&mut self) -> Result<Value> {
         self.transport
             .request("account/rateLimits/read", Value::Null)
+            .await
+    }
+
+    pub async fn model_list(&mut self) -> Result<Value> {
+        self.transport
+            .request(
+                "model/list",
+                json!({
+                    "includeHidden": false,
+                }),
+            )
             .await
     }
 

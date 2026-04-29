@@ -1,6 +1,7 @@
 pub mod app;
 pub mod composer;
 pub mod event_loop;
+mod model_picker;
 pub mod panels;
 
 use std::{
@@ -14,6 +15,9 @@ use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use model_picker::{
+    ModelPicker, ModelSelection, draw_model_picker, parse_model_options, reasoning_effort_label,
 };
 use oml_codex_appserver::client::{AccountSummary, AppServerClient};
 use ratatui::{
@@ -39,6 +43,7 @@ struct TuiState {
     thread_id: Option<String>,
     active_turn_id: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
     input: String,
     status: String,
     transcript: Vec<TranscriptEntry>,
@@ -46,6 +51,7 @@ struct TuiState {
     rate_limits: RateLimitUsage,
     should_exit: bool,
     pending_approval: Option<PendingApproval>,
+    model_picker: Option<ModelPicker>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -83,6 +89,7 @@ impl TuiState {
             thread_id: None,
             active_turn_id: None,
             model: None,
+            reasoning_effort: None,
             input: String::new(),
             status: "Connecting to Codex app-server...".to_owned(),
             transcript: Vec::new(),
@@ -90,6 +97,7 @@ impl TuiState {
             rate_limits: RateLimitUsage::default(),
             should_exit: false,
             pending_approval: None,
+            model_picker: None,
         }
     }
 
@@ -195,6 +203,46 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
         if event::poll(TICK_RATE)? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Esc if app.model_picker.is_some() => {
+                        if app
+                            .model_picker
+                            .as_mut()
+                            .is_some_and(ModelPicker::cancel_or_back)
+                        {
+                            app.model_picker = None;
+                            app.status = "Model selection canceled.".to_owned();
+                        } else {
+                            app.status = "Select a model and effort.".to_owned();
+                        }
+                    }
+                    KeyCode::Up if app.model_picker.is_some() => {
+                        if let Some(picker) = app.model_picker.as_mut() {
+                            picker.select_previous();
+                        }
+                    }
+                    KeyCode::Down if app.model_picker.is_some() => {
+                        if let Some(picker) = app.model_picker.as_mut() {
+                            picker.select_next();
+                        }
+                    }
+                    KeyCode::Enter if app.model_picker.is_some() => {
+                        if let Some(selection) =
+                            app.model_picker.as_mut().and_then(ModelPicker::accept)
+                        {
+                            apply_model_selection(&mut app, selection);
+                        }
+                    }
+                    KeyCode::Char(character) if app.model_picker.is_some() => {
+                        if let Some(number) = character.to_digit(10).map(|digit| digit as usize)
+                            && let Some(selection) = app
+                                .model_picker
+                                .as_mut()
+                                .and_then(|picker| picker.select_number(number))
+                        {
+                            apply_model_selection(&mut app, selection);
+                        }
+                    }
+                    _ if app.model_picker.is_some() => {}
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         if app.active_turn_id.is_some() {
                             interrupt_turn(&mut client, &mut app).await;
@@ -278,7 +326,13 @@ async fn submit_input(client: &mut AppServerClient, app: &mut TuiState) {
 
     let cwd = app.cwd.to_string_lossy().into_owned();
     match client
-        .turn_start_with_model(&thread_id, &cwd, &prompt, app.model.as_deref())
+        .turn_start_with_model(
+            &thread_id,
+            &cwd,
+            &prompt,
+            app.model.as_deref(),
+            app.reasoning_effort.as_deref(),
+        )
         .await
     {
         Ok(turn_id) => {
@@ -295,7 +349,7 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
     match command {
         "/help" => {
             app.push_system(
-                "Commands: /help, /status, /account, /usage, /limits, /diff, /model <name>, /cd <path>, /list, /resume <thread-id>, /review, /compact, /approve, /approve-session, /deny, /cancel, /clear, /new, /interrupt, /exit",
+                "Commands: /help, /status, /account, /usage, /limits, /diff, /model, /model <name>, /cd <path>, /list, /resume <thread-id>, /review, /compact, /approve, /approve-session, /deny, /cancel, /clear, /new, /interrupt, /exit",
             );
             app.status = "Help shown.".to_owned();
         }
@@ -303,9 +357,10 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
             let thread = app.thread_id.as_deref().unwrap_or("none");
             let turn = app.active_turn_id.as_deref().unwrap_or("none");
             app.push_system(format!(
-                "{}\nthread: {thread}\nactive turn: {turn}\nmodel: {}",
+                "{}\nthread: {thread}\nactive turn: {turn}\nmodel: {}\nreasoning effort: {}",
                 app.account_line(),
-                app.model.as_deref().unwrap_or("default")
+                app.model.as_deref().unwrap_or("default"),
+                app.reasoning_effort.as_deref().unwrap_or("default")
             ));
             app.status = "Status shown.".to_owned();
         }
@@ -397,12 +452,16 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
         "/exit" | "/quit" => {
             app.should_exit = true;
         }
+        "/model" => {
+            open_model_picker(client, app).await;
+        }
         command if command.starts_with("/model ") => {
             let model = command.trim_start_matches("/model ").trim();
             if model.is_empty() {
-                app.status = "Usage: /model <name>".to_owned();
+                open_model_picker(client, app).await;
             } else {
                 app.model = Some(model.to_owned());
+                app.reasoning_effort = None;
                 app.push_system(format!("Model set to {model}. Applies to the next turn."));
                 app.status = format!("Model set to {model}.");
             }
@@ -431,6 +490,48 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
             app.status = "Unknown command.".to_owned();
         }
     }
+}
+
+async fn open_model_picker(client: &mut AppServerClient, app: &mut TuiState) {
+    match client.model_list().await {
+        Ok(result) => {
+            let options = parse_model_options(&result);
+            let picker = ModelPicker::new(
+                options,
+                app.model.as_deref(),
+                app.reasoning_effort.as_deref(),
+            );
+            if picker.is_empty() {
+                app.status = "No selectable models returned by Codex.".to_owned();
+                return;
+            }
+
+            app.model_picker = Some(picker);
+            app.status = "Select a model and effort.".to_owned();
+        }
+        Err(error) => {
+            app.status = format!("Failed to list models: {error}");
+        }
+    }
+}
+
+fn apply_model_selection(app: &mut TuiState, selection: ModelSelection) {
+    let ModelSelection { model, effort } = selection;
+    app.model = Some(model.clone());
+    app.reasoning_effort = effort.clone();
+    app.model_picker = None;
+
+    let effort_text = effort
+        .as_deref()
+        .map(|effort| {
+            format!(
+                " with {} reasoning",
+                reasoning_effort_label(effort).to_lowercase()
+            )
+        })
+        .unwrap_or_default();
+    app.push_system(format!("Model changed to {model}{effort_text}."));
+    app.status = format!("Model changed to {model}{effort_text}.");
 }
 
 fn resolve_cwd(current: &Path, path: &str) -> Result<PathBuf, String> {
@@ -956,6 +1057,10 @@ fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     draw_limit_bar(frame, app, rows[1]);
     draw_transcript(frame, app, rows[2]);
     draw_composer(frame, app, rows[3]);
+
+    if let Some(picker) = app.model_picker.as_ref() {
+        draw_model_picker(frame, picker, area);
+    }
 }
 
 fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
@@ -966,6 +1071,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
         .unwrap_or("unknown");
     let usage = app.usage.as_deref().unwrap_or("usage pending");
     let model = app.model.as_deref().unwrap_or("default");
+    let reasoning = app.reasoning_effort.as_deref().unwrap_or("default");
     let uptime = app.started_at.elapsed().as_secs();
 
     let header = Paragraph::new(vec![
@@ -980,10 +1086,11 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
             Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
         ]),
         Line::from(format!(
-            "cwd: {} · plan: {} · model: {} · {} · {}s",
+            "cwd: {} · plan: {} · model: {} · reasoning: {} · {} · {}s",
             app.cwd.display(),
             account,
             model,
+            reasoning,
             usage,
             uptime
         )),

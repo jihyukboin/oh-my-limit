@@ -6,7 +6,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
 };
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::{
     app::{TranscriptRole, TuiState},
@@ -23,7 +23,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),
+            Constraint::Length(6),
             Constraint::Length(3),
             Constraint::Min(8),
             Constraint::Length(composer_height),
@@ -54,40 +54,30 @@ fn composer_height(app: &TuiState) -> u16 {
 }
 
 fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
-    let model = model_summary(app);
-    let translator = app.config.translation.provider.as_str();
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(5)])
+        .constraints([Constraint::Length(1), Constraint::Length(5)])
         .split(area);
 
-    let header = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled(
-                "Oh My Limit",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" for Codex  "),
-            Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
-        ]),
-        Line::from(format!(
-            "{} · {} · translator: {}",
-            app.cwd.display(),
-            model,
-            translator
-        )),
-    ]);
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Oh My Limit",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" for Codex  "),
+        Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
+    ]));
     frame.render_widget(header, rows[0]);
 
     let table = Table::new(
         vec![
-            token_usage_row("translator", app.translator_usage),
-            token_usage_row("codex", app.codex_usage),
+            token_usage_row(translator_source_label(app), app.translator_usage),
+            token_usage_row(codex_source_label(app), app.codex_usage),
         ],
         [
-            Constraint::Length(14),
+            Constraint::Length(36),
             Constraint::Length(14),
             Constraint::Length(14),
             Constraint::Length(14),
@@ -113,7 +103,22 @@ fn model_summary(app: &TuiState) -> String {
     }
 }
 
-fn token_usage_row(label: &'static str, usage: Option<super::app::TokenUsage>) -> Row<'static> {
+fn translator_source_label(app: &TuiState) -> String {
+    let provider = app.config.translation.provider.as_str();
+    let location = match provider {
+        "openai" => "remote",
+        "ollama" | "local-openai-compatible" => "local",
+        _ => provider,
+    };
+    let model = app.config.translation.model.as_deref().unwrap_or("default");
+    format!("translator {location}-{model}")
+}
+
+fn codex_source_label(app: &TuiState) -> String {
+    format!("codex {}", model_summary(app))
+}
+
+fn token_usage_row(label: String, usage: Option<super::app::TokenUsage>) -> Row<'static> {
     let (input, cached, output) = match usage {
         Some(usage) => (
             format_token_count(usage.input),
@@ -124,7 +129,7 @@ fn token_usage_row(label: &'static str, usage: Option<super::app::TokenUsage>) -
     };
 
     Row::new(vec![
-        Cell::from(label),
+        Cell::from(label).style(Style::default().fg(Color::Cyan)),
         Cell::from(input),
         Cell::from(cached),
         Cell::from(output),
@@ -274,7 +279,7 @@ fn draw_transcript(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
 
     let transcript = Paragraph::new(visible_lines)
         .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::TOP));
+        .block(Block::default());
     frame.render_widget(transcript, area);
 }
 
@@ -337,15 +342,9 @@ fn draw_composer(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
     }
 
     let footer_y = area.bottom().saturating_sub(1);
-    let left_hint = if app.input.is_empty() {
-        "? for shortcuts"
-    } else if app.active_turn_id.is_some() {
-        "enter waits for current turn"
-    } else {
-        "enter to send"
-    };
+    let left_text = truncate_to_width(&format!("  {}", app.cwd.display()), area.width as usize);
     frame.render_widget(
-        Paragraph::new(format!("  {left_hint}")).style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(left_text).style(Style::default().fg(Color::DarkGray)),
         Rect {
             x: area.x,
             y: footer_y,
@@ -354,44 +353,22 @@ fn draw_composer(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
         },
     );
 
-    let right_hint = limit_footer_hint(app);
-    let right_hint_width = right_hint.width() as u16;
-    if !right_hint.is_empty() && right_hint_width < area.width {
-        let x = area
-            .right()
-            .saturating_sub(right_hint_width)
-            .saturating_sub(2);
-        frame.render_widget(
-            Paragraph::new(right_hint).style(Style::default().fg(Color::DarkGray)),
-            Rect {
-                x,
-                y: footer_y,
-                width: area.right().saturating_sub(x),
-                height: 1,
-            },
-        );
-    }
-
     let (cursor_x, cursor_y) = input_cursor_position(app, text_area);
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
-fn limit_footer_hint(app: &TuiState) -> String {
-    match (
-        app.rate_limits.five_hour_percent,
-        app.rate_limits.weekly_percent,
-    ) {
-        (Some(five_hour), Some(weekly)) => {
-            format!(
-                "5h {}% left · weekly {}% left",
-                100 - five_hour,
-                100 - weekly
-            )
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    let mut width = 0;
+    let mut output = String::new();
+    for character in text.chars() {
+        let character_width = character.width().unwrap_or_default();
+        if width + character_width > max_width {
+            break;
         }
-        (Some(five_hour), None) => format!("5h {}% left", 100 - five_hour),
-        (None, Some(weekly)) => format!("weekly {}% left", 100 - weekly),
-        (None, None) => String::new(),
+        output.push(character);
+        width += character_width;
     }
+    output
 }
 
 fn input_cursor_position(app: &TuiState, area: Rect) -> (u16, u16) {

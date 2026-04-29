@@ -41,9 +41,7 @@ pub(super) async fn connect(app: &mut TuiState) -> anyhow::Result<AppServerClien
     let thread_id = thread.id.clone();
     app.thread_id = Some(thread_id.clone());
     app.set_coding_model(thread.model, thread.reasoning_effort);
-    app.status = "Connected to Codex. Type a message and press Enter.".to_owned();
-    app.push_system(format!("Connected to Codex thread {thread_id}."));
-    app.push_system(app.translator_line());
+    app.status = format!("Connected to Codex thread {thread_id}.");
 
     Ok(client)
 }

@@ -3,8 +3,10 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
 };
+
+const POPUP_BG: Color = Color::Rgb(24, 24, 24);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TranslatorProviderSelection {
@@ -145,8 +147,17 @@ impl TranslatorPicker {
 }
 
 pub(crate) fn draw_translator_picker(frame: &mut Frame<'_>, picker: &TranslatorPicker, area: Rect) {
-    let area = centered_rect(88, 62, area);
+    let area = modal_rect(area);
+    let popup = Block::default()
+        .title("Translator")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .padding(Padding::new(1, 1, 0, 0))
+        .style(Style::default().bg(POPUP_BG));
     frame.render_widget(Clear, area);
+    frame.render_widget(popup.clone(), area);
+    let area = popup.inner(area);
+
     let rows = Layout::vertical([
         Constraint::Length(header_height(picker)),
         Constraint::Min(5),
@@ -164,12 +175,14 @@ pub(crate) fn draw_translator_picker(frame: &mut Frame<'_>, picker: &TranslatorP
         state.select(Some(picker.selected));
         let list = List::new(items)
             .highlight_symbol("› ")
-            .highlight_style(Style::default().fg(Color::Cyan));
+            .highlight_style(Style::default().fg(Color::Cyan).bg(POPUP_BG))
+            .style(Style::default().bg(POPUP_BG));
         frame.render_stateful_widget(list, rows[1], &mut state);
     }
 
     frame.render_widget(
-        Paragraph::new("Enter confirm · Esc back").style(Style::default().fg(Color::Gray)),
+        Paragraph::new("Enter confirm · Esc back")
+            .style(Style::default().fg(Color::Gray).bg(POPUP_BG)),
         rows[2],
     );
 }
@@ -200,6 +213,7 @@ fn header(picker: &TranslatorPicker) -> Paragraph<'static> {
         Line::from(Span::styled(subtitle, Style::default().fg(Color::Gray))),
         Line::from(""),
     ])
+    .style(Style::default().bg(POPUP_BG))
 }
 
 fn header_height(_picker: &TranslatorPicker) -> u16 {
@@ -245,6 +259,7 @@ fn api_key_input(picker: &TranslatorPicker) -> Paragraph<'static> {
             Style::default().fg(Color::Gray),
         )),
     ])
+    .style(Style::default().bg(POPUP_BG))
 }
 
 fn row(name: &'static str, description: &'static str) -> ListItem<'static> {
@@ -257,18 +272,13 @@ fn row(name: &'static str, description: &'static str) -> ListItem<'static> {
     ]))
 }
 
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
+fn modal_rect(area: Rect) -> Rect {
+    let width = area.width.saturating_sub(4).clamp(48, 92).min(area.width);
+    let height = area.height.saturating_sub(6).clamp(14, 20).min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
 }

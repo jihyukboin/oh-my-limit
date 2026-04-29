@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -89,11 +89,11 @@ impl SlashCommandPopup {
 
 pub(crate) fn draw_slash_command_popup(
     frame: &mut Frame<'_>,
-    popup: &SlashCommandPopup,
+    popup_state: &SlashCommandPopup,
     composer_area: Rect,
 ) {
-    let width = composer_area.width.clamp(32, 92);
-    let filtered = popup.filtered();
+    let width = composer_area.width.min(64);
+    let filtered = popup_state.filtered();
     let visible_len = filtered.len().min(8) as u16;
     let height = visible_len.saturating_add(2).max(3);
     let x = composer_area.x;
@@ -105,7 +105,16 @@ pub(crate) fn draw_slash_command_popup(
         height,
     };
 
+    let popup_window = Block::default()
+        .title("Commands")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .padding(Padding::new(1, 1, 0, 0))
+        .style(Style::default().bg(Color::Rgb(24, 24, 24)));
     frame.render_widget(Clear, area);
+    frame.render_widget(popup_window.clone(), area);
+    let area = popup_window.inner(area);
+
     let items = filtered
         .iter()
         .map(|command| {
@@ -121,12 +130,12 @@ pub(crate) fn draw_slash_command_popup(
         .collect::<Vec<_>>();
     let mut state = ListState::default();
     if !filtered.is_empty() {
-        state.select(Some(popup.selected.min(filtered.len() - 1)));
+        state.select(Some(popup_state.selected.min(filtered.len() - 1)));
     }
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Commands"))
         .highlight_symbol("› ")
-        .highlight_style(Style::default().fg(Color::Cyan));
+        .highlight_style(Style::default().fg(Color::Cyan).bg(Color::Rgb(24, 24, 24)))
+        .style(Style::default().bg(Color::Rgb(24, 24, 24)));
     frame.render_stateful_widget(list, area, &mut state);
 }
 

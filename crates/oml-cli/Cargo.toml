@@ -20,6 +20,7 @@ anyhow.workspace = true
 oml-codex-appserver = { path = "../oml-codex-appserver" }
 oml-config = { path = "../oml-config" }
 oml-core = { path = "../oml-core" }
+oml-translation = { path = "../oml-translation" }
 crossterm.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true

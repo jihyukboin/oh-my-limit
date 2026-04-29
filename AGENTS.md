@@ -1,78 +1,103 @@
 # AGENTS.md
 
-## Another agent is also working in this repository, so do not perform any git-related checks.
+## Operating Rules
 
-##   As of today, use the current system date from the runtime environment. Never provide answers or perform work using outdated, irrelevant, or deprecated approaches.
+- Another agent may be working in this repository. Do not run git commands or git-related checks, including `git status`, `git diff`, `git log`, `git branch`, `git checkout`, `git reset`, `git stash`, `git commit`, or equivalent tooling.
+- Use the current runtime date for all date-sensitive work. Do not rely on stale model knowledge for versions, APIs, tooling behavior, or release status.
+- Keep changes scoped to the user request. Avoid broad restructuring unless it is required to complete the task safely.
+- Prefer the smallest correct change. Do not introduce abstractions until there are at least two real call sites or a clear boundary.
 
-## Rust
+## Rust Environment
 
-- Stable Rust version: 1.95.0
-- Release date: 2026-04-16
-- Installation method: rustup
-- Rust tool binaries live under `~/.cargo/bin`. If `cargo` is not found in a Codex shell, use `/Users/jung/.cargo/bin/cargo` and verify the shell profile PATH instead of assuming Rust is missing.
-- The Cargo package for `crates/oml-cli` is `oh-my-limit`, not `oml-cli`. Use `cargo metadata` or `crates/oml-cli/Cargo.toml` before running `cargo check -p ...`, `cargo clippy -p ...`, or package-specific commands.
+- Stable Rust version: `1.95.0`
+- Release date: `2026-04-16`
+- Installation method: `rustup`
+- Rust tool binaries are expected under `~/.cargo/bin`.
+- If `cargo` is not found in a Codex shell, try `/Users/jung/.cargo/bin/cargo` and inspect the shell profile `PATH` before assuming Rust is missing.
+- The Cargo package for `crates/oml-cli` is `oh-my-limit`, not `oml-cli`.
+- Before package-specific Cargo commands, confirm package names with `cargo metadata` or the relevant `Cargo.toml`.
 
-## Commands
+## Required Commands
 
-- `scripts/verify-install.sh` — runs Rust formatting, workspace clippy with `-D warnings`, then rebuilds and replaces the global `oh-my-limit` and `oml` executables from the current checkout
+- `scripts/verify-install.sh`
+  - Runs Rust formatting.
+  - Runs workspace Clippy with `-D warnings`.
+  - Rebuilds and replaces the global `oh-my-limit` and `oml` executables from the current checkout.
 
 ## Definition of Done
 
-For any turn that changes Rust source, CLI behavior, or this repository's agent instructions, run this exactly once before the final response:
+For any turn that changes Rust source, CLI behavior, or repository agent instructions, run this command exactly once before the final response:
 
-1. `scripts/verify-install.sh`
+```sh
+scripts/verify-install.sh
+```
 
-Report any skipped command with the concrete reason. Do not use `cargo check -p oml-cli`; the package name is `oh-my-limit`.
+- Report the result in the final response.
+- If the command is skipped, report the concrete reason.
+- Do not run `cargo check -p oml-cli`; the package name is `oh-my-limit`.
+- Do not run duplicate formatting or Clippy commands when `scripts/verify-install.sh` already covers them, unless a narrower diagnostic is needed before the final verification.
+- Run additional targeted tests only when the change affects behavior not covered by the required verification command.
 
-## Serena MCP — Prefer Over Built-in Tools for Code Operations (when available)
+## Code Navigation and Edits
 
-| Situation | Tool |
+Prefer Serena MCP over built-in code tools when available and reliable.
+
+| Task | Preferred Serena tool |
 |---|---|
-| Understand file structure | `get_symbols_overview` — skip full file read if overview suffices |
-| Find function/class by name | `find_symbol` — LSP-accurate, no false positives |
-| Find all callers/references | `find_referencing_symbols` — semantic only, ignores comments/strings |
-| Modify function body | `replace_symbol_body` — targets by symbol name, no line-number drift |
-| Insert code before/after function | `insert_before_symbol` / `insert_after_symbol` |
-| Rename across codebase | `rename_symbol` — **never use text find-replace for renaming** |
-| Delete unused symbol | `safe_delete_symbol` — checks references first, **prefer over manual apply_patch deletion** |
-| Search text patterns | `search_for_pattern` — auto token-limit, respects project ignored_paths |
+| Understand file structure | `get_symbols_overview` |
+| Find a function, type, class, or method | `find_symbol` |
+| Find callers or references | `find_referencing_symbols` |
+| Replace a function or method body | `replace_symbol_body` |
+| Insert code near a symbol | `insert_before_symbol` / `insert_after_symbol` |
+| Rename a symbol across code | `rename_symbol` |
+| Delete an unused symbol | `safe_delete_symbol` |
+| Search text patterns | `search_for_pattern` |
 
-Use built-in tools for: new files, non-code files (.env/.json/.md/.yml), shell commands.
-For advanced grep (`-c`, `--type`, `--replace`): `npm run rg -- "pattern" path/`
+Use built-in tools for:
 
-Workflow:
+- New files
+- Non-code files such as `.env`, `.json`, `.md`, `.yml`, and `.toml`
+- Shell commands
+- Cases where Serena is unavailable, stale, or fails
 
-- **Read**: `get_symbols_overview` → `find_symbol` → `find_referencing_symbols`
-- **Edit**: `replace_symbol_body` / `insert_before_symbol` / `insert_after_symbol`
-- **Delete**: `safe_delete_symbol` (checks references automatically)
-- **Verify**: follow the Definition of Done below
+If Serena fails, fall back to built-in tools and report the failure briefly.
 
-If Serena tool fails, fall back to built-in tools and report the issue.
+Preferred workflow:
+
+1. Read: `get_symbols_overview` → `find_symbol` → `find_referencing_symbols`
+2. Edit: symbol-aware Serena edit tools when possible
+3. Delete: `safe_delete_symbol` before manual deletion
+4. Verify: follow the Definition of Done
+
+For advanced grep features such as counts, type filters, or replacement previews, use:
+
+```sh
+npm run rg -- "pattern" path/
+```
 
 ## File Size and Structure
-
-### File Size Budget
 
 Keep source files below 1000 lines whenever practical.
 
 - Treat 700 lines as an early warning point.
 - Treat 1000 lines as a hard review point.
-- Do not add substantial new logic to a file that is already near or above 1000 lines.
-- If a change would push a file past 1000 lines, first split the code by responsibility.
+- Do not add substantial new logic to a file near or above 1000 lines.
+- If a change would push a file past 1000 lines, first split code by responsibility.
 - Generated files, lockfiles, schema snapshots, fixtures, and vendored data are exempt.
 
 When splitting files:
 
-- Split by domain responsibility, not by arbitrary line count.
-- Prefer small modules with clear names over generic buckets like `utils`, `helpers`, or `common`.
-- Keep public APIs narrow. Use `pub(crate)` by default inside crates.
+- Split by domain responsibility, not arbitrary line count.
+- Prefer clear module names over generic names such as `utils`, `helpers`, or `common`.
+- Use `pub(crate)` by default inside crates.
 - Re-export from `mod.rs` or `lib.rs` only when it improves call-site clarity.
+- Keep splits surgical and behavior-preserving.
 
-### Rust Module Structure
+## Rust Module Guidelines
 
-For Rust crates, organize modules around ownership and behavior.
+Organize Rust modules around ownership and behavior.
 
-Prefer:
+Prefer structures like:
 
 ```text
 src/
@@ -93,7 +118,7 @@ src/
       status.rs
 ```
 
-Avoid:
+Avoid generic buckets like:
 
 ```text
 src/
@@ -107,43 +132,38 @@ A module should usually own one of these:
 
 - A domain concept
 - A command or workflow
-- A transport/client boundary
+- A transport or client boundary
 - A persistence boundary
 - A UI panel or screen
 - A parser/formatter pair
-- Error types for a specific boundary
+- Boundary-specific error types
 
-### Expansion Rules
+## Expansion Rules
 
-When adding new behavior:
+When adding behavior:
 
-- Place code in the crate that owns the behavior.
-- Add a new module only when the responsibility is distinct enough to name clearly.
-- Do not create abstraction layers before there are at least two real call sites or a clear boundary.
-- Keep orchestration code thin; move detailed logic into domain modules.
-- Keep CLI/TUI code focused on input, output, and flow control.
+- Put code in the crate that owns the behavior.
+- Add a new module only when the responsibility is distinct and nameable.
+- Keep orchestration code thin.
+- Move detailed logic into domain modules.
+- Keep CLI and TUI code focused on input, output, and flow control.
 - Keep core crates independent from CLI, TUI, filesystem, and process concerns unless that is their explicit purpose.
-
-### Refactoring Trigger
 
 Before editing a large file, check whether the requested change belongs in a smaller module.
 
-If a file is approaching 1000 lines, prefer one of these small refactors before adding more code:
+If a file is approaching 1000 lines, prefer one of these narrow refactors before adding more logic:
 
 - Move a nested workflow into `feature_name.rs`.
 - Move command-specific code into `commands/<command>.rs`.
 - Move UI panel code into `tui/panels/<panel>.rs`.
-- Move protocol/request/response handling into boundary-specific modules.
+- Move protocol, request, or response handling into boundary-specific modules.
 - Move pure domain logic into the relevant core crate.
 
-Do not perform broad restructuring unless required by the current task. Keep splits surgical and behavior-preserving.
+## Final Response Requirements
 
-### Verification
+When finishing a task:
 
-After structural changes:
-
-- Run `cargo fmt`.
-- Run the narrowest relevant test or check.
-- For crate-level changes, run `cargo test -p <crate>`.
-- For workspace-impacting changes, run `cargo test --workspace` when practical.
-- Confirm moved code did not widen visibility unnecessarily.
+- Summarize what changed.
+- Report verification commands run and their results.
+- Report skipped required commands with concrete reasons.
+- Mention any Serena fallback only if it affected the workflow.

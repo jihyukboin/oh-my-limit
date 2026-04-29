@@ -4,6 +4,7 @@ pub(super) fn insert_input(app: &mut TuiState, character: char) {
     let cursor = app.input_cursor.min(app.input.len());
     app.input.insert(cursor, character);
     app.input_cursor = cursor + character.len_utf8();
+    app.sync_slash_popup();
 }
 
 pub(super) fn backspace_input(app: &mut TuiState) {
@@ -12,6 +13,7 @@ pub(super) fn backspace_input(app: &mut TuiState) {
     };
     app.input.drain(previous..app.input_cursor);
     app.input_cursor = previous;
+    app.sync_slash_popup();
 }
 
 pub(super) fn delete_input(app: &mut TuiState) {
@@ -19,6 +21,7 @@ pub(super) fn delete_input(app: &mut TuiState) {
         return;
     };
     app.input.drain(app.input_cursor..next);
+    app.sync_slash_popup();
 }
 
 pub(super) fn move_input_cursor_left(app: &mut TuiState) {

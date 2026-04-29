@@ -11,6 +11,8 @@ use unicode_width::UnicodeWidthStr;
 use super::{
     app::{TranscriptRole, TuiState},
     model_picker::draw_model_picker,
+    slash_command_popup::draw_slash_command_popup,
+    translator_picker::draw_translator_picker,
 };
 
 const USER_MESSAGE_BG: Color = Color::Rgb(31, 31, 31);
@@ -33,8 +35,16 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     draw_transcript(frame, app, rows[2]);
     draw_composer(frame, app, rows[3]);
 
+    if let Some(popup) = app.slash_popup.as_ref() {
+        draw_slash_command_popup(frame, popup, rows[3]);
+    }
+
     if let Some(picker) = app.model_picker.as_ref() {
         draw_model_picker(frame, picker, area);
+    }
+
+    if let Some(picker) = app.translator_picker.as_ref() {
+        draw_translator_picker(frame, picker, area);
     }
 }
 
@@ -52,6 +62,7 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
     let usage = app.usage.as_deref().unwrap_or("usage pending");
     let model = app.model.as_deref().unwrap_or("default");
     let reasoning = app.reasoning_effort.as_deref().unwrap_or("default");
+    let translator = app.config.translation.provider.as_str();
     let uptime = app.started_at.elapsed().as_secs();
 
     let header = Paragraph::new(vec![
@@ -66,11 +77,12 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
             Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
         ]),
         Line::from(format!(
-            "cwd: {} · plan: {} · model: {} · reasoning: {} · {} · {}s",
+            "cwd: {} · plan: {} · model: {} · reasoning: {} · translator: {} · {} · {}s",
             app.cwd.display(),
             account,
             model,
             reasoning,
+            translator,
             usage,
             uptime
         )),

@@ -2,18 +2,8 @@ use super::app::RateLimitUsage;
 use serde_json::Value;
 
 pub(super) fn rate_limit_summary(params: &Value) -> Option<String> {
-    let rate_limits = params.get("rateLimits").unwrap_or(params);
-    let usage = rate_limit_usage(params)?;
-    let plan = rate_limits
-        .get("planType")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-
-    Some(format!(
-        "Ready. Codex {plan}; 5h {}; weekly {}.",
-        limit_percent_text(usage.five_hour_percent),
-        limit_percent_text(usage.weekly_percent)
-    ))
+    rate_limit_usage(params)?;
+    Some("Ready.".to_owned())
 }
 
 pub(super) fn rate_limit_usage(params: &Value) -> Option<RateLimitUsage> {
@@ -68,10 +58,4 @@ fn assign_rate_limit_window(
 fn limit_window_percent(window: &Value) -> Option<u16> {
     let percent = window.get("usedPercent").and_then(Value::as_u64)?;
     Some(percent.min(100) as u16)
-}
-
-fn limit_percent_text(percent: Option<u16>) -> String {
-    percent
-        .map(|percent| format!("{percent}%"))
-        .unwrap_or_else(|| "pending".to_owned())
 }

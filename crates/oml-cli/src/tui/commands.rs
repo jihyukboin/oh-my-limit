@@ -9,14 +9,14 @@ use std::{
 use oml_codex_appserver::client::AppServerClient;
 use oml_config::{config::AppConfig, env_file::save_env_value};
 use oml_translation::translator::{
-    TranslationDirection, TranslationProviderKind, TranslationRequest, TranslatorConfig,
-    build_translator,
+    TranslationDirection, TranslationProviderKind, TranslationRequest, TranslationResponse,
+    TranslatorConfig, build_translator,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use serde_json::{Value, json};
 
 use super::{
-    app::TuiState,
+    app::{TokenUsage, TuiState},
     limits::{rate_limit_summary, rate_limit_usage},
     model_picker::{ModelPicker, ModelSelection, parse_model_options, reasoning_effort_label},
     translator_picker::{TranslatorPicker, TranslatorPickerAction, TranslatorProviderSelection},
@@ -37,8 +37,10 @@ pub(super) async fn connect(app: &mut TuiState) -> anyhow::Result<AppServerClien
     }
 
     let cwd = app.cwd.to_string_lossy().into_owned();
-    let thread_id = client.thread_start(&cwd).await?;
+    let thread = client.thread_start(&cwd).await?;
+    let thread_id = thread.id.clone();
     app.thread_id = Some(thread_id.clone());
+    app.set_coding_model(thread.model, thread.reasoning_effort);
     app.status = "Connected to Codex. Type a message and press Enter.".to_owned();
     app.push_system(format!("Connected to Codex thread {thread_id}."));
     app.push_system(app.translator_line());
@@ -80,14 +82,20 @@ pub(super) async fn submit_input(
     app.status = "Translating prompt...".to_owned();
     terminal.draw(|frame| draw(frame, app))?;
 
-    let codex_prompt = match translate_for_codex(app, &prompt).await {
-        Ok(codex_prompt) => codex_prompt,
+    let translation = match translate_for_codex(app, &prompt).await {
+        Ok(translation) => translation,
         Err(error) => {
             app.status = format!("Translation failed: {error}");
             app.replace_last_assistant_message(format!("Translation failed: {error}"));
             return Ok(());
         }
     };
+    app.translator_usage = translation.usage.map(|usage| TokenUsage {
+        input: usage.input_tokens,
+        cached: usage.cached_input_tokens,
+        output: usage.output_tokens,
+    });
+    let codex_prompt = translation.text;
 
     if codex_prompt != prompt {
         app.set_last_user_translation(codex_prompt.clone());
@@ -223,8 +231,10 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
                 .thread_start_with_model(&cwd, app.model.as_deref())
                 .await
             {
-                Ok(thread_id) => {
+                Ok(thread) => {
+                    let thread_id = thread.id.clone();
                     app.thread_id = Some(thread_id.clone());
+                    app.set_coding_model(thread.model, thread.reasoning_effort);
                     app.transcript.clear();
                     app.push_system(format!("Started new Codex thread {thread_id}."));
                     app.status = "New thread ready.".to_owned();
@@ -280,10 +290,17 @@ async fn handle_slash_command(client: &mut AppServerClient, app: &mut TuiState, 
     }
 }
 
-async fn translate_for_codex(app: &mut TuiState, prompt: &str) -> anyhow::Result<String> {
+async fn translate_for_codex(
+    app: &mut TuiState,
+    prompt: &str,
+) -> anyhow::Result<TranslationResponse> {
     let provider = TranslationProviderKind::from_str(&app.config.translation.provider)?;
     if provider == TranslationProviderKind::Noop {
-        return Ok(prompt.to_owned());
+        return Ok(TranslationResponse {
+            text: prompt.to_owned(),
+            provider,
+            usage: None,
+        });
     }
 
     let translator_config = match translator_config(app) {
@@ -291,7 +308,11 @@ async fn translate_for_codex(app: &mut TuiState, prompt: &str) -> anyhow::Result
         Err(error) if app.config.translation.fail_closed => return Err(error),
         Err(error) => {
             app.push_system(format!("Translation skipped: {error}"));
-            return Ok(prompt.to_owned());
+            return Ok(TranslationResponse {
+                text: prompt.to_owned(),
+                provider,
+                usage: None,
+            });
         }
     };
 
@@ -303,11 +324,15 @@ async fn translate_for_codex(app: &mut TuiState, prompt: &str) -> anyhow::Result
         })
         .await
     {
-        Ok(response) => Ok(response.text),
+        Ok(response) => Ok(response),
         Err(error) if app.config.translation.fail_closed => Err(error),
         Err(error) => {
             app.push_system(format!("Translation skipped: {error}"));
-            Ok(prompt.to_owned())
+            Ok(TranslationResponse {
+                text: prompt.to_owned(),
+                provider,
+                usage: None,
+            })
         }
     }
 }
@@ -774,8 +799,10 @@ async fn resume_thread(client: &mut AppServerClient, app: &mut TuiState, thread_
 
     let cwd = app.cwd.to_string_lossy().into_owned();
     match client.thread_resume(thread_id, &cwd).await {
-        Ok(resumed_thread_id) => {
+        Ok(thread) => {
+            let resumed_thread_id = thread.id.clone();
             app.thread_id = Some(resumed_thread_id.clone());
+            app.set_coding_model(thread.model, thread.reasoning_effort);
             app.transcript.clear();
             app.push_system(format!("Resumed Codex thread {resumed_thread_id}."));
             app.status = "Thread resumed.".to_owned();

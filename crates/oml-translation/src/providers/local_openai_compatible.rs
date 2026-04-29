@@ -84,6 +84,7 @@ impl Translator for LocalOpenAiCompatibleTranslator {
         Ok(TranslationResponse {
             text,
             provider: TranslationProviderKind::LocalOpenAiCompatible,
+            usage: None,
         })
     }
 

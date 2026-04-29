@@ -41,6 +41,14 @@ pub struct TranslationRequest {
 pub struct TranslationResponse {
     pub text: String,
     pub provider: TranslationProviderKind,
+    pub usage: Option<TranslationTokenUsage>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct TranslationTokenUsage {
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

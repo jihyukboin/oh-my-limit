@@ -4,7 +4,7 @@ use tokio::time;
 
 use super::{
     EVENT_DRAIN_TIMEOUT,
-    app::{PendingApproval, TuiState},
+    app::{PendingApproval, TokenUsage, TuiState},
     limits::{rate_limit_summary, rate_limit_usage},
 };
 
@@ -63,7 +63,8 @@ fn handle_app_server_message(app: &mut TuiState, message: &Value) {
             }
         }
         Some("thread/tokenUsage/updated") => {
-            app.usage = token_usage_summary(message.get("params").unwrap_or(&Value::Null));
+            app.codex_usage =
+                token_usage_from_params(message.get("params").unwrap_or(&Value::Null));
         }
         Some("account/rateLimits/updated") => {
             let params = message.get("params").unwrap_or(&Value::Null);
@@ -180,7 +181,7 @@ fn completed_agent_answer(params: &Value) -> Option<String> {
     item.get("text").and_then(Value::as_str).map(str::to_owned)
 }
 
-fn token_usage_summary(params: &Value) -> Option<String> {
+fn token_usage_from_params(params: &Value) -> Option<TokenUsage> {
     let total = params.get("tokenUsage")?.get("total")?;
     let input = total.get("inputTokens").and_then(Value::as_u64)?;
     let output = total.get("outputTokens").and_then(Value::as_u64)?;
@@ -188,5 +189,9 @@ fn token_usage_summary(params: &Value) -> Option<String> {
         .get("cachedInputTokens")
         .and_then(Value::as_u64)
         .unwrap_or_default();
-    Some(format!("input {input} · cached {cached} · output {output}"))
+    Some(TokenUsage {
+        input,
+        cached,
+        output,
+    })
 }

@@ -6,7 +6,7 @@ use crate::{
     prompts::{system_prompt, user_prompt},
     translator::{
         ProviderHealth, TranslationProviderKind, TranslationRequest, TranslationResponse,
-        Translator, TranslatorConfig,
+        TranslationTokenUsage, Translator, TranslatorConfig,
     },
     validate::validate_non_empty_translation,
 };
@@ -103,6 +103,7 @@ impl Translator for RemoteOpenAiCompatibleTranslator {
         Ok(TranslationResponse {
             text,
             provider: TranslationProviderKind::OpenAi,
+            usage: token_usage_from_response(&body),
         })
     }
 
@@ -121,6 +122,23 @@ impl Translator for RemoteOpenAiCompatibleTranslator {
             message: "OpenAI API reachable".to_owned(),
         })
     }
+}
+
+fn token_usage_from_response(body: &Value) -> Option<TranslationTokenUsage> {
+    let usage = body.get("usage")?;
+    let input_tokens = usage.get("input_tokens").and_then(Value::as_u64)?;
+    let output_tokens = usage.get("output_tokens").and_then(Value::as_u64)?;
+    let cached_input_tokens = usage
+        .get("input_tokens_details")
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+
+    Some(TranslationTokenUsage {
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+    })
 }
 
 fn translated_text_from_response(body: &Value) -> Result<String> {

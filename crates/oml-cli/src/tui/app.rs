@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Instant};
+use std::path::PathBuf;
 
 use oml_codex_appserver::client::AccountSummary;
 use oml_config::{
@@ -15,7 +15,6 @@ use super::translator_picker::TranslatorPicker;
 #[derive(Debug)]
 pub(super) struct TuiState {
     pub(super) cwd: PathBuf,
-    pub(super) started_at: Instant,
     pub(super) account: Option<AccountSummary>,
     pub(super) thread_id: Option<String>,
     pub(super) active_turn_id: Option<String>,
@@ -30,7 +29,8 @@ pub(super) struct TuiState {
     pub(super) input_cursor: usize,
     pub(super) status: String,
     pub(super) transcript: Vec<TranscriptEntry>,
-    pub(super) usage: Option<String>,
+    pub(super) translator_usage: Option<TokenUsage>,
+    pub(super) codex_usage: Option<TokenUsage>,
     pub(super) rate_limits: RateLimitUsage,
     pub(super) should_exit: bool,
     pub(super) pending_approval: Option<PendingApproval>,
@@ -43,6 +43,13 @@ pub(super) struct TuiState {
 pub(super) struct RateLimitUsage {
     pub(super) five_hour_percent: Option<u16>,
     pub(super) weekly_percent: Option<u16>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub(super) struct TokenUsage {
+    pub(super) input: u64,
+    pub(super) cached: u64,
+    pub(super) output: u64,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -90,7 +97,6 @@ impl TuiState {
 
         Self {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            started_at: Instant::now(),
             account: None,
             thread_id: None,
             active_turn_id: None,
@@ -105,7 +111,8 @@ impl TuiState {
             input_cursor: 0,
             status,
             transcript: Vec::new(),
-            usage: None,
+            translator_usage: None,
+            codex_usage: None,
             rate_limits: RateLimitUsage::default(),
             should_exit: false,
             pending_approval: None,
@@ -121,6 +128,11 @@ impl TuiState {
             text: text.into(),
             translated_text: None,
         });
+    }
+
+    pub(super) fn set_coding_model(&mut self, model: String, reasoning_effort: Option<String>) {
+        self.model = Some(model);
+        self.reasoning_effort = reasoning_effort;
     }
 
     pub(super) fn push_user(&mut self, text: String) {

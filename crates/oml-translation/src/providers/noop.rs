@@ -16,6 +16,7 @@ impl crate::translator::Translator for NoopTranslator {
         Ok(crate::translator::TranslationResponse {
             text: request.text,
             provider: crate::translator::TranslationProviderKind::Noop,
+            usage: None,
         })
     }
 

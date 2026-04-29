@@ -81,6 +81,7 @@ impl Translator for OllamaTranslator {
         Ok(TranslationResponse {
             text,
             provider: TranslationProviderKind::Ollama,
+            usage: None,
         })
     }
 

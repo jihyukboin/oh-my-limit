@@ -4,7 +4,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -23,7 +23,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(7),
             Constraint::Length(3),
             Constraint::Min(8),
             Constraint::Length(composer_height),
@@ -54,16 +54,12 @@ fn composer_height(app: &TuiState) -> u16 {
 }
 
 fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
-    let account = app
-        .account
-        .as_ref()
-        .and_then(|account| account.plan_type.as_deref())
-        .unwrap_or("unknown");
-    let usage = app.usage.as_deref().unwrap_or("usage pending");
-    let model = app.model.as_deref().unwrap_or("default");
-    let reasoning = app.reasoning_effort.as_deref().unwrap_or("default");
+    let model = model_summary(app);
     let translator = app.config.translation.provider.as_str();
-    let uptime = app.started_at.elapsed().as_secs();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Length(5)])
+        .split(area);
 
     let header = Paragraph::new(vec![
         Line::from(vec![
@@ -77,17 +73,78 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
             Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
         ]),
         Line::from(format!(
-            "cwd: {} · plan: {} · model: {} · reasoning: {} · translator: {} · {} · {}s",
+            "{} · {} · translator: {}",
             app.cwd.display(),
-            account,
             model,
-            reasoning,
-            translator,
-            usage,
-            uptime
+            translator
         )),
     ]);
-    frame.render_widget(header, area);
+    frame.render_widget(header, rows[0]);
+
+    let table = Table::new(
+        vec![
+            token_usage_row("translator", app.translator_usage),
+            token_usage_row("codex", app.codex_usage),
+        ],
+        [
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+            Constraint::Length(14),
+        ],
+    )
+    .header(
+        Row::new(vec!["source", "input", "cached", "output"]).style(
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        ),
+    )
+    .block(Block::default().borders(Borders::ALL));
+    frame.render_widget(table, rows[1]);
+}
+
+fn model_summary(app: &TuiState) -> String {
+    match (app.model.as_deref(), app.reasoning_effort.as_deref()) {
+        (Some(model), Some(reasoning)) => format!("{model} {reasoning}"),
+        (Some(model), None) => model.to_owned(),
+        (None, Some(reasoning)) => format!("model pending {reasoning}"),
+        (None, None) => "model pending".to_owned(),
+    }
+}
+
+fn token_usage_row(label: &'static str, usage: Option<super::app::TokenUsage>) -> Row<'static> {
+    let (input, cached, output) = match usage {
+        Some(usage) => (
+            format_token_count(usage.input),
+            format_token_count(usage.cached),
+            format_token_count(usage.output),
+        ),
+        None => (
+            "pending".to_owned(),
+            "pending".to_owned(),
+            "pending".to_owned(),
+        ),
+    };
+
+    Row::new(vec![
+        Cell::from(label),
+        Cell::from(input),
+        Cell::from(cached),
+        Cell::from(output),
+    ])
+}
+
+fn format_token_count(value: u64) -> String {
+    let value = value.to_string();
+    let mut formatted = String::with_capacity(value.len() + value.len() / 3);
+    for (index, character) in value.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            formatted.push(',');
+        }
+        formatted.push(character);
+    }
+    formatted.chars().rev().collect()
 }
 
 fn draw_limit_bar(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {

@@ -31,6 +31,13 @@ pub struct AccountSummary {
     pub requires_openai_auth: bool,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ThreadSession {
+    pub id: String,
+    pub model: String,
+    pub reasoning_effort: Option<String>,
+}
+
 impl AppServerClient {
     pub async fn spawn() -> Result<Self> {
         Ok(Self {
@@ -86,7 +93,7 @@ impl AppServerClient {
         })
     }
 
-    pub async fn thread_start(&mut self, cwd: &str) -> Result<String> {
+    pub async fn thread_start(&mut self, cwd: &str) -> Result<ThreadSession> {
         self.thread_start_with_model(cwd, None).await
     }
 
@@ -94,7 +101,7 @@ impl AppServerClient {
         &mut self,
         cwd: &str,
         model: Option<&str>,
-    ) -> Result<String> {
+    ) -> Result<ThreadSession> {
         let result = self
             .transport
             .request(
@@ -108,8 +115,7 @@ impl AppServerClient {
             )
             .await?;
 
-        json_string_at(&result, &["thread", "id"])
-            .context("thread/start response missing thread.id")
+        thread_session_from_response(&result, "thread/start")
     }
 
     pub async fn turn_start(&mut self, thread_id: &str, cwd: &str, prompt: &str) -> Result<String> {
@@ -218,7 +224,7 @@ impl AppServerClient {
             .await
     }
 
-    pub async fn thread_resume(&mut self, thread_id: &str, cwd: &str) -> Result<String> {
+    pub async fn thread_resume(&mut self, thread_id: &str, cwd: &str) -> Result<ThreadSession> {
         let result = self
             .transport
             .request(
@@ -231,8 +237,7 @@ impl AppServerClient {
             )
             .await?;
 
-        json_string_at(&result, &["thread", "id"])
-            .context("thread/resume response missing thread.id")
+        thread_session_from_response(&result, "thread/resume")
     }
 
     pub async fn respond_server_request(&mut self, id: Value, result: Value) -> Result<()> {
@@ -320,7 +325,8 @@ impl AppServerClient {
 
         self.initialize().await?;
         let account = self.account_read().await?;
-        let thread_id = self.thread_start(&cwd).await?;
+        let thread = self.thread_start(&cwd).await?;
+        let thread_id = thread.id;
         let turn_id = self
             .turn_start(&thread_id, &cwd, options.prompt.as_str())
             .await?;
@@ -347,6 +353,20 @@ fn json_string_at(value: &Value, path: &[&str]) -> Option<String> {
     }
 
     current.as_str().map(str::to_owned)
+}
+
+fn thread_session_from_response(value: &Value, method: &str) -> Result<ThreadSession> {
+    let id = json_string_at(value, &["thread", "id"])
+        .with_context(|| format!("{method} response missing thread.id"))?;
+    let model = json_string_at(value, &["model"])
+        .with_context(|| format!("{method} response missing model"))?;
+    let reasoning_effort = json_string_at(value, &["reasoningEffort"]);
+
+    Ok(ThreadSession {
+        id,
+        model,
+        reasoning_effort,
+    })
 }
 
 fn completed_agent_answer(params: &Value) -> Option<String> {

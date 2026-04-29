@@ -344,6 +344,7 @@ dependencies = [
  "ratatui",
  "serde_json",
  "tokio",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

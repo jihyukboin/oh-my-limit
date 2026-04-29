@@ -33,6 +33,7 @@ serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
+unicode-width = "0.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -42,4 +43,3 @@ missing_debug_implementations = "warn"
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
-

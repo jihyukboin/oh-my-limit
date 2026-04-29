@@ -1,0 +1,53 @@
+ignore_all_files_in_gitignore: true
+
+languages:
+  - rust
+  - markdown
+
+ignored_paths:
+  - '.git/**'
+  - '.codex/**'
+  - '.serena/cache/**'
+  - '.idea/**'
+  - '.vscode/**'
+  - 'target/**'
+  - '.local/**'
+  - '.oh-my-limit/**'
+  - 'dist/**'
+  - 'coverage/**'
+  - 'secrets/**'
+  - '**/.DS_Store'
+
+default_modes:
+  - editing
+  - no-memories
+
+fixed_tools:
+  - activate_project
+  - get_current_config
+  - initial_instructions
+  - get_symbols_overview
+  - find_symbol
+  - find_referencing_symbols
+  - replace_symbol_body
+  - insert_after_symbol
+  - insert_before_symbol
+  - rename_symbol
+  - safe_delete_symbol
+  - search_for_pattern
+
+encoding: utf-8
+project_name: oh-my-limit
+
+excluded_tools: []
+included_optional_tools: []
+
+base_modes: []
+symbol_info_budget: 5.0
+language_backend: LSP
+line_ending: lf
+read_only_memory_patterns: []
+read_only: false
+initial_prompt: ''
+ignored_memory_patterns: []
+ls_specific_settings: {}

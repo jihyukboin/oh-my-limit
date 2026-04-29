@@ -1,0 +1,43 @@
+name: oh-my-limit
+
+services:
+  serena-mcp:
+    build:
+      context: ../../..
+      dockerfile: scripts/dev/docker/serena.Dockerfile
+    image: oh-my-limit-serena-mcp:dev
+    container_name: serena-mcp
+    working_dir: /workspace/oh-my-limit
+    command:
+      - uvx
+      - -p
+      - "3.13"
+      - --from
+      - git+https://github.com/oraios/serena
+      - serena
+      - start-mcp-server
+      - --transport
+      - streamable-http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "9124"
+      - --context
+      - codex
+      - --project
+      - /workspace/oh-my-limit
+    ports:
+      - "127.0.0.1:9124:9124"
+    volumes:
+      - ../../../:/workspace/oh-my-limit
+      - oh-my-limit-serena-uv-cache:/root/.cache/uv
+      - oh-my-limit-cargo-registry:/usr/local/cargo/registry
+      - oh-my-limit-cargo-git:/usr/local/cargo/git
+    environment:
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped
+
+volumes:
+  oh-my-limit-serena-uv-cache:
+  oh-my-limit-cargo-registry:
+  oh-my-limit-cargo-git:

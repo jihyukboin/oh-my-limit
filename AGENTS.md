@@ -1,5 +1,7 @@
 # AGENTS.md
 
+## Another agent is also working in this repository, so do not perform any git-related checks.
+
 ##   As of today, use the current system date from the runtime environment. Never provide answers or perform work using outdated, irrelevant, or deprecated approaches.
 
 ## Rust

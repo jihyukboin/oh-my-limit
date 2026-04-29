@@ -21,8 +21,9 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    symbols,
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 use serde_json::{Value, json};
 use tokio::{runtime::Runtime, time};
@@ -1016,17 +1017,34 @@ fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, perc
     let title = percent
         .map(|_| format!("{title} {remaining_percent}%"))
         .unwrap_or_else(|| format!("{title} pending"));
-    let gauge = Gauge::default()
-        .block(Block::default().title(title).borders(Borders::ALL))
-        .gauge_style(
-            Style::default()
-                .fg(percent.map(limit_color).unwrap_or(Color::DarkGray))
-                .bg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        )
-        .percent(remaining_percent)
-        .label(Span::raw(""));
-    frame.render_widget(gauge, area);
+    frame.render_widget(Block::default().title(title).borders(Borders::ALL), area);
+
+    let inner = Rect {
+        x: area.x.saturating_add(1),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+    if inner.is_empty() {
+        return;
+    }
+
+    let fill_width = (u32::from(inner.width) * u32::from(remaining_percent) / 100) as u16;
+    let bar_style = Style::default()
+        .fg(percent.map(limit_color).unwrap_or(Color::DarkGray))
+        .bg(Color::Black)
+        .add_modifier(Modifier::BOLD);
+    let empty_style = Style::default().fg(Color::Black).bg(Color::Black);
+    let buffer = frame.buffer_mut();
+
+    buffer.set_style(inner, empty_style);
+    for y in inner.top()..inner.bottom() {
+        for x in inner.left()..inner.left().saturating_add(fill_width) {
+            buffer[(x, y)]
+                .set_symbol(symbols::block::FULL)
+                .set_style(bar_style);
+        }
+    }
 }
 
 fn limit_color(percent: u16) -> Color {

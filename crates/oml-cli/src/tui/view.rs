@@ -23,20 +23,18 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),
-            Constraint::Length(3),
+            Constraint::Length(9),
             Constraint::Min(8),
             Constraint::Length(composer_height),
         ])
         .split(area);
 
-    draw_header(frame, app, rows[0]);
-    draw_limit_bar(frame, app, rows[1]);
-    draw_transcript(frame, app, rows[2]);
-    draw_composer(frame, app, rows[3]);
+    draw_dashboard(frame, app, rows[0]);
+    draw_transcript(frame, app, rows[1]);
+    draw_composer(frame, app, rows[2]);
 
     if let Some(popup) = app.slash_popup.as_ref() {
-        draw_slash_command_popup(frame, popup, rows[3]);
+        draw_slash_command_popup(frame, popup, rows[2]);
     }
 
     if let Some(picker) = app.model_picker.as_ref() {
@@ -53,11 +51,25 @@ fn composer_height(app: &TuiState) -> u16 {
     input_lines.min(6) + 3
 }
 
-fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
+fn draw_dashboard(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.is_empty() {
+        return;
+    }
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(5)])
-        .split(area);
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(3),
+        ])
+        .split(inner);
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
@@ -70,17 +82,21 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
         Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
     ]));
     frame.render_widget(header, rows[0]);
+    draw_usage_table(frame, app, rows[1]);
+    draw_limit_bar(frame, app, rows[2]);
+}
 
+fn draw_usage_table(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
     let table = Table::new(
         vec![
             token_usage_row(translator_source_label(app), app.translator_usage),
             token_usage_row(codex_source_label(app), app.codex_usage),
         ],
         [
-            Constraint::Length(36),
-            Constraint::Length(14),
-            Constraint::Length(14),
-            Constraint::Length(14),
+            Constraint::Min(28),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(12),
         ],
     )
     .header(
@@ -89,9 +105,8 @@ fn draw_header(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         ),
-    )
-    .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(table, rows[1]);
+    );
+    frame.render_widget(table, area);
 }
 
 fn model_summary(app: &TuiState) -> String {
@@ -151,7 +166,11 @@ fn format_token_count(value: u64) -> String {
 fn draw_limit_bar(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Length(2),
+            Constraint::Percentage(50),
+        ])
         .split(area);
 
     draw_limit_gauge(
@@ -162,7 +181,7 @@ fn draw_limit_bar(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
     );
     draw_limit_gauge(
         frame,
-        columns[1],
+        columns[2],
         "weekly limit",
         app.rate_limits.weekly_percent,
     );
@@ -174,13 +193,27 @@ fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, perc
     let title = percent
         .map(|_| format!("{title} {remaining_percent}%"))
         .unwrap_or_else(|| format!("{title} pending"));
-    frame.render_widget(Block::default().title(title).borders(Borders::ALL), area);
+    if area.is_empty() {
+        return;
+    }
+
+    let label = Line::from(vec![
+        Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled("remaining", Style::default().fg(Color::DarkGray)),
+    ]);
+    frame.render_widget(Paragraph::new(label), area);
 
     let inner = Rect {
-        x: area.x.saturating_add(1),
+        x: area.x,
         y: area.y.saturating_add(1),
-        width: area.width.saturating_sub(2),
-        height: area.height.saturating_sub(2),
+        width: area.width,
+        height: area.height.saturating_sub(1).min(1),
     };
     if inner.is_empty() {
         return;
@@ -191,11 +224,14 @@ fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, perc
         .fg(percent.map(limit_color).unwrap_or(Color::DarkGray))
         .bg(Color::Black)
         .add_modifier(Modifier::BOLD);
-    let empty_style = Style::default().fg(Color::Black).bg(Color::Black);
+    let empty_style = Style::default().fg(Color::DarkGray).bg(Color::Black);
     let buffer = frame.buffer_mut();
 
     buffer.set_style(inner, empty_style);
     for y in inner.top()..inner.bottom() {
+        for x in inner.left()..inner.right() {
+            buffer[(x, y)].set_symbol("░").set_style(empty_style);
+        }
         for x in inner.left()..inner.left().saturating_add(fill_width) {
             buffer[(x, y)]
                 .set_symbol(symbols::block::FULL)

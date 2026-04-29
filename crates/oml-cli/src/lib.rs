@@ -8,7 +8,7 @@ pub fn run() {
     match command.as_str() {
         "doctor" => commands::doctor::run(),
         "codex" => match args.next().as_deref() {
-            Some("run") => commands::run::run(),
+            Some("run") => commands::run::run(args),
             _ => commands::codex::run(),
         },
         "bench" => commands::bench::run(),

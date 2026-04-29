@@ -16,11 +16,14 @@ name = "oml"
 path = "src/bin/oml.rs"
 
 [dependencies]
+anyhow.workspace = true
 oml-codex-appserver = { path = "../oml-codex-appserver" }
 oml-config = { path = "../oml-config" }
 oml-core = { path = "../oml-core" }
 crossterm.workspace = true
 ratatui.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

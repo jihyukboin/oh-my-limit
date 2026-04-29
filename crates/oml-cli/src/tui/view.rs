@@ -255,7 +255,7 @@ fn draw_transcript(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
     for entry in &app.transcript {
         let (label, style) = match entry.role {
             TranscriptRole::User => (
-                "›",
+                "user",
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
@@ -286,18 +286,14 @@ fn draw_transcript(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
         if entry.role == TranscriptRole::User
             && let Some(translated_text) = entry.translated_text.as_ref()
         {
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(
-                    "translated",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
+            lines.push(Line::from(Span::styled(
+                "  codex prompt",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )));
             lines.extend(translated_text.lines().map(|line| {
-                Line::from(format!("  {line}"))
-                    .style(Style::default().fg(Color::Gray).bg(USER_MESSAGE_BG))
+                Line::from(format!("    {line}")).style(Style::default().fg(Color::Gray))
             }));
         }
         lines.push(Line::from(""));

@@ -24,6 +24,7 @@ oml-translation = { path = "../oml-translation" }
 crossterm.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true
+textwrap.workspace = true
 tokio.workspace = true
 unicode-width.workspace = true
 

@@ -4,36 +4,31 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::{
-    app::{TranscriptRole, TuiState},
-    model_picker::draw_model_picker,
-    slash_command_popup::draw_slash_command_popup,
+    app::TuiState, model_picker::draw_model_picker, slash_command_popup::draw_slash_command_popup,
     translator_picker::draw_translator_picker,
 };
 
-const USER_MESSAGE_BG: Color = Color::Rgb(31, 31, 31);
-
 pub(super) fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     let area = frame.area();
-    let composer_height = composer_height(app);
+    let bottom_pane_height = app.bottom_pane.desired_height(area.width);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(9),
+            Constraint::Length(5),
             Constraint::Min(8),
-            Constraint::Length(composer_height),
+            Constraint::Length(bottom_pane_height),
         ])
         .split(area);
 
     draw_dashboard(frame, app, rows[0]);
     draw_transcript(frame, app, rows[1]);
-    draw_composer(frame, app, rows[2]);
+    draw_bottom_pane(frame, app, rows[2]);
 
-    if let Some(popup) = app.slash_popup.as_ref() {
+    if let Some(popup) = app.bottom_pane.slash_popup() {
         draw_slash_command_popup(frame, popup, rows[2]);
     }
 
@@ -44,11 +39,6 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &TuiState) {
     if let Some(picker) = app.translator_picker.as_ref() {
         draw_translator_picker(frame, picker, area);
     }
-}
-
-fn composer_height(app: &TuiState) -> u16 {
-    let input_lines = app.input.split('\n').count().max(1) as u16;
-    input_lines.min(6) + 3
 }
 
 fn draw_dashboard(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
@@ -64,11 +54,7 @@ fn draw_dashboard(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
         .split(inner);
 
     let header = Paragraph::new(Line::from(vec![
@@ -82,31 +68,7 @@ fn draw_dashboard(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
         Span::styled(app.status.as_str(), Style::default().fg(Color::Gray)),
     ]));
     frame.render_widget(header, rows[0]);
-    draw_usage_table(frame, app, rows[1]);
-    draw_limit_bar(frame, app, rows[2]);
-}
-
-fn draw_usage_table(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
-    let table = Table::new(
-        vec![
-            token_usage_row(translator_source_label(app), app.translator_usage),
-            token_usage_row(codex_source_label(app), app.codex_usage),
-        ],
-        [
-            Constraint::Min(28),
-            Constraint::Length(12),
-            Constraint::Length(12),
-            Constraint::Length(12),
-        ],
-    )
-    .header(
-        Row::new(vec!["source", "input", "cached", "output"]).style(
-            Style::default()
-                .fg(Color::Gray)
-                .add_modifier(Modifier::BOLD),
-        ),
-    );
-    frame.render_widget(table, area);
+    draw_limit_bar(frame, app, rows[1]);
 }
 
 fn model_summary(app: &TuiState) -> String {
@@ -135,24 +97,6 @@ fn translator_source_label(app: &TuiState) -> String {
 
 fn codex_source_label(app: &TuiState) -> String {
     format!("codex {}", model_summary(app))
-}
-
-fn token_usage_row(label: String, usage: Option<super::app::TokenUsage>) -> Row<'static> {
-    let (input, cached, output) = match usage {
-        Some(usage) => (
-            format_token_count(usage.input),
-            format_token_count(usage.cached),
-            format_token_count(usage.output),
-        ),
-        None => ("0".to_owned(), "0".to_owned(), "0".to_owned()),
-    };
-
-    Row::new(vec![
-        Cell::from(label).style(Style::default().fg(Color::Cyan)),
-        Cell::from(input),
-        Cell::from(cached),
-        Cell::from(output),
-    ])
 }
 
 fn format_token_count(value: u64) -> String {
@@ -253,176 +197,35 @@ fn limit_color(percent: u16) -> Color {
 }
 
 fn draw_transcript(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
-    let height = area.height.saturating_sub(2) as usize;
-    let mut lines = Vec::new();
-
-    for entry in &app.transcript {
-        let (label, style) = match entry.role {
-            TranscriptRole::User => (
-                "user",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            TranscriptRole::Assistant => (
-                "codex",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            TranscriptRole::System => ("system", Style::default().fg(Color::DarkGray)),
-        };
-        let line_style = match entry.role {
-            TranscriptRole::User => user_message_style(),
-            TranscriptRole::Assistant | TranscriptRole::System => Style::default(),
-        };
-
-        lines.push(Line::from(Span::styled(label, style)).style(line_style));
-        let text = if entry.text.is_empty() {
-            "…".to_owned()
-        } else {
-            entry.text.clone()
-        };
-        lines.extend(
-            text.lines()
-                .map(|line| Line::from(format!("  {line}")).style(line_style)),
-        );
-        if entry.role == TranscriptRole::User
-            && let Some(translated_text) = entry.translated_text.as_ref()
-        {
-            lines.push(Line::from(Span::styled(
-                "  codex prompt",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            lines.extend(translated_text.lines().map(|line| {
-                Line::from(format!("    {line}")).style(Style::default().fg(Color::Gray))
-            }));
-        }
-        lines.push(Line::from(""));
-    }
-
-    if lines.is_empty() {
-        lines.push(Line::from("Connected TUI will appear here."));
-    }
-
-    let visible_lines = if lines.len() > height {
-        lines.split_off(lines.len() - height)
-    } else {
-        lines
-    };
-
-    let transcript = Paragraph::new(visible_lines)
+    let transcript = Paragraph::new(app.chat.display_lines(area))
         .wrap(Wrap { trim: false })
         .block(Block::default());
     frame.render_widget(transcript, area);
 }
 
-fn draw_composer(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
-    if area.is_empty() {
-        return;
-    }
-
-    let text_area = Rect {
-        x: area.x.saturating_add(2),
-        y: area.y.saturating_add(1),
-        width: area.width.saturating_sub(2),
-        height: area.height.saturating_sub(3).max(1),
-    };
-    let prompt_style = if app.active_turn_id.is_some() || app.pending_approval.is_some() {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
-    };
-    let composer_style = user_message_style();
-    let composer_area = Rect {
-        x: area.x,
-        y: text_area.y,
-        width: area.width,
-        height: text_area.height,
-    };
-    frame.render_widget(Block::default().style(composer_style), composer_area);
-    frame.render_widget(
-        Paragraph::new("›").style(prompt_style.bg(USER_MESSAGE_BG)),
-        Rect {
-            x: area.x,
-            y: text_area.y,
-            width: 1,
-            height: 1,
-        },
+fn draw_bottom_pane(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
+    app.bottom_pane.render(
+        frame,
+        area,
+        &app.cwd,
+        footer_status_line(app),
+        app.active_turn_id.is_some(),
+        app.pending_approval.is_some(),
     );
-
-    if app.input.is_empty() {
-        let placeholder = if app.pending_approval.is_some() {
-            "Approval required"
-        } else if app.active_turn_id.is_some() {
-            "Codex is responding..."
-        } else {
-            "Ask Codex to do anything"
-        };
-        frame.render_widget(
-            Paragraph::new(placeholder)
-                .style(Style::default().fg(Color::DarkGray).bg(USER_MESSAGE_BG)),
-            text_area,
-        );
-    } else {
-        frame.render_widget(
-            Paragraph::new(app.input.as_str())
-                .style(Style::default().fg(Color::White).bg(USER_MESSAGE_BG))
-                .wrap(Wrap { trim: false }),
-            text_area,
-        );
-    }
-
-    let footer_y = area.bottom().saturating_sub(1);
-    let left_text = truncate_to_width(&format!("  {}", app.cwd.display()), area.width as usize);
-    frame.render_widget(
-        Paragraph::new(left_text).style(Style::default().fg(Color::DarkGray)),
-        Rect {
-            x: area.x,
-            y: footer_y,
-            width: area.width,
-            height: 1,
-        },
-    );
-
-    let (cursor_x, cursor_y) = input_cursor_position(app, text_area);
+    let (cursor_x, cursor_y) = app.bottom_pane.cursor_pos(area);
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    let mut width = 0;
-    let mut output = String::new();
-    for character in text.chars() {
-        let character_width = character.width().unwrap_or_default();
-        if width + character_width > max_width {
-            break;
-        }
-        output.push(character);
-        width += character_width;
-    }
-    output
-}
-
-fn input_cursor_position(app: &TuiState, area: Rect) -> (u16, u16) {
-    let before_cursor = &app.input[..app.input_cursor.min(app.input.len())];
-    let row = before_cursor.bytes().filter(|byte| *byte == b'\n').count() as u16;
-    let column = before_cursor
-        .rsplit_once('\n')
-        .map_or(before_cursor, |(_, line)| line)
-        .width() as u16;
-
-    (
-        area.x
-            .saturating_add(column.min(area.width.saturating_sub(1))),
-        area.y
-            .saturating_add(row.min(area.height.saturating_sub(1))),
-    )
-}
-
-fn user_message_style() -> Style {
-    Style::default().bg(USER_MESSAGE_BG)
+fn footer_status_line(app: &TuiState) -> String {
+    let translator = translator_source_label(app);
+    let codex = codex_source_label(app);
+    let translator_tokens = app
+        .translator_usage
+        .map(|usage| format_token_count(usage.input + usage.output))
+        .unwrap_or_else(|| "0".to_owned());
+    let codex_tokens = app
+        .codex_usage
+        .map(|usage| format_token_count(usage.input + usage.output))
+        .unwrap_or_else(|| "0".to_owned());
+    format!("{codex} | {translator} | tx {translator_tokens} | codex {codex_tokens}")
 }

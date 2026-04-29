@@ -8,8 +8,10 @@ use oml_config::{
 };
 use serde_json::Value;
 
+use super::app_event::AppEvent;
+use super::bottom_pane::BottomPane;
+use super::chat::ChatWidget;
 use super::model_picker::ModelPicker;
-use super::slash_command_popup::SlashCommandPopup;
 use super::translator_picker::TranslatorPicker;
 
 #[derive(Debug)]
@@ -25,18 +27,17 @@ pub(super) struct TuiState {
     pub(super) config: AppConfig,
     pub(super) env_values: std::collections::HashMap<String, String>,
     pub(super) openai_api_key: Option<String>,
-    pub(super) input: String,
-    pub(super) input_cursor: usize,
     pub(super) status: String,
-    pub(super) transcript: Vec<TranscriptEntry>,
+    pub(super) chat: ChatWidget,
+    pub(super) bottom_pane: BottomPane,
     pub(super) translator_usage: Option<TokenUsage>,
     pub(super) codex_usage: Option<TokenUsage>,
     pub(super) rate_limits: RateLimitUsage,
     pub(super) should_exit: bool,
     pub(super) pending_approval: Option<PendingApproval>,
-    pub(super) slash_popup: Option<SlashCommandPopup>,
     pub(super) model_picker: Option<ModelPicker>,
     pub(super) translator_picker: Option<TranslatorPicker>,
+    app_events: std::collections::VecDeque<AppEvent>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -50,20 +51,6 @@ pub(super) struct TokenUsage {
     pub(super) input: u64,
     pub(super) cached: u64,
     pub(super) output: u64,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct TranscriptEntry {
-    pub(super) role: TranscriptRole,
-    pub(super) text: String,
-    pub(super) translated_text: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum TranscriptRole {
-    User,
-    Assistant,
-    System,
 }
 
 #[derive(Debug, Clone)]
@@ -107,27 +94,59 @@ impl TuiState {
             config,
             env_values,
             openai_api_key: None,
-            input: String::new(),
-            input_cursor: 0,
             status,
-            transcript: Vec::new(),
+            chat: ChatWidget::default(),
+            bottom_pane: BottomPane::default(),
             translator_usage: None,
             codex_usage: None,
             rate_limits: RateLimitUsage::default(),
             should_exit: false,
             pending_approval: None,
-            slash_popup: None,
             model_picker: None,
             translator_picker: None,
+            app_events: std::collections::VecDeque::new(),
+        }
+    }
+
+    pub(super) fn emit(&mut self, event: AppEvent) {
+        self.app_events.push_back(event);
+    }
+
+    pub(super) fn process_app_events(&mut self) {
+        while let Some(event) = self.app_events.pop_front() {
+            match event {
+                AppEvent::SetStatus(status) => self.status = status,
+                AppEvent::PushError(text) => self.push_error(text),
+                AppEvent::PushApproval(text) => self.push_approval(text),
+                AppEvent::PushPlan(text) => self.push_plan(text),
+                AppEvent::PushToolCall { label, text } => self.push_tool_call(label, text),
+                AppEvent::PushFinalSeparator(label) => self.push_final_separator(label),
+            }
         }
     }
 
     pub(super) fn push_system(&mut self, text: impl Into<String>) {
-        self.transcript.push(TranscriptEntry {
-            role: TranscriptRole::System,
-            text: text.into(),
-            translated_text: None,
-        });
+        self.chat.push_system(text);
+    }
+
+    pub(super) fn push_error(&mut self, text: impl Into<String>) {
+        self.chat.push_error(text);
+    }
+
+    pub(super) fn push_approval(&mut self, text: impl Into<String>) {
+        self.chat.push_approval(text);
+    }
+
+    pub(super) fn push_final_separator(&mut self, label: Option<String>) {
+        self.chat.push_final_separator(label);
+    }
+
+    pub(super) fn push_tool_call(&mut self, label: String, text: String) {
+        self.chat.push_tool_call(label, text);
+    }
+
+    pub(super) fn push_plan(&mut self, text: String) {
+        self.chat.push_plan(text);
     }
 
     pub(super) fn set_coding_model(&mut self, model: String, reasoning_effort: Option<String>) {
@@ -144,61 +163,23 @@ impl TuiState {
         text: String,
         translated_text: Option<String>,
     ) {
-        self.transcript.push(TranscriptEntry {
-            role: TranscriptRole::User,
-            text,
-            translated_text,
-        });
+        self.chat.push_user_with_translation(text, translated_text);
     }
 
     pub(super) fn set_last_user_translation(&mut self, translated_text: String) {
-        if let Some(entry) = self
-            .transcript
-            .iter_mut()
-            .rev()
-            .find(|entry| entry.role == TranscriptRole::User)
-        {
-            entry.translated_text = Some(translated_text);
-        }
+        self.chat.set_last_user_translation(translated_text);
     }
 
     pub(super) fn start_assistant_message(&mut self) {
-        self.transcript.push(TranscriptEntry {
-            role: TranscriptRole::Assistant,
-            text: String::new(),
-            translated_text: None,
-        });
+        self.chat.start_assistant_message();
     }
 
     pub(super) fn append_assistant_delta(&mut self, delta: &str) {
-        if !matches!(
-            self.transcript.last().map(|entry| &entry.role),
-            Some(TranscriptRole::Assistant)
-        ) {
-            self.start_assistant_message();
-        }
-
-        if let Some(entry) = self.transcript.last_mut() {
-            entry.text.push_str(delta);
-        }
+        self.chat.append_assistant_delta(delta);
     }
 
     pub(super) fn replace_last_assistant_message(&mut self, text: String) {
-        if let Some(entry) = self
-            .transcript
-            .iter_mut()
-            .rev()
-            .find(|entry| entry.role == TranscriptRole::Assistant)
-        {
-            entry.text = text;
-            return;
-        }
-
-        self.transcript.push(TranscriptEntry {
-            role: TranscriptRole::Assistant,
-            text,
-            translated_text: None,
-        });
+        self.chat.replace_last_assistant_message(text);
     }
 
     pub(super) fn account_line(&self) -> String {
@@ -234,18 +215,9 @@ impl TuiState {
 
     pub(super) fn sync_slash_popup(&mut self) {
         if self.model_picker.is_some() || self.translator_picker.is_some() {
-            self.slash_popup = None;
-            return;
-        }
-
-        if SlashCommandPopup::should_show(&self.input) {
-            if let Some(popup) = self.slash_popup.as_mut() {
-                popup.update(&self.input);
-            } else {
-                self.slash_popup = Some(SlashCommandPopup::new(&self.input));
-            }
+            self.bottom_pane.dismiss_slash_popup();
         } else {
-            self.slash_popup = None;
+            self.bottom_pane.sync_slash_popup();
         }
     }
 }

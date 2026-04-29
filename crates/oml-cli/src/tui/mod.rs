@@ -1,23 +1,23 @@
 mod app;
+mod app_event;
+mod bottom_pane;
+mod chat;
 mod commands;
-mod composer;
 mod events;
 mod limits;
 mod model_picker;
 mod slash_command_popup;
+mod submission;
 mod translator_picker;
+mod translator_settings;
 mod view;
+mod width;
+mod wrapping;
 
 use std::{io, time::Duration};
 
 use app::TuiState;
-use commands::{
-    apply_model_selection, apply_translator_selection, connect, interrupt_turn, submit_input,
-};
-use composer::{
-    backspace_input, delete_input, insert_input, insert_input_text, move_input_cursor_left,
-    move_input_cursor_right, move_input_cursor_to_line_end, move_input_cursor_to_line_start,
-};
+use commands::{apply_model_selection, connect, interrupt_turn};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
@@ -29,9 +29,10 @@ use crossterm::{
 use events::drain_app_server_events;
 use model_picker::ModelPicker;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use slash_command_popup::SlashCommandPopup;
+use submission::{submit_current_input, submit_next_queued_input};
 use tokio::runtime::Runtime;
 use translator_picker::{TranslatorPicker, TranslatorPickerAction};
+use translator_settings::apply_translator_selection;
 use view::draw;
 
 const TICK_RATE: Duration = Duration::from_millis(50);
@@ -73,6 +74,12 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
 
     loop {
         drain_app_server_events(&mut client, &mut app).await;
+        app.process_app_events();
+        app.chat.commit_stream();
+        submit_next_queued_input(&mut client, &mut app, terminal).await?;
+        if let Ok(size) = terminal.size() {
+            app.chat.prepare_reflow(size.width);
+        }
         terminal.draw(|frame| draw(frame, &app))?;
 
         if event::poll(TICK_RATE)? {
@@ -191,45 +198,47 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                     }
                     _ if app.translator_picker.is_some() => {}
                     _ if app.model_picker.is_some() => {}
-                    KeyCode::Esc if app.slash_popup.is_some() => {
-                        app.slash_popup = None;
+                    KeyCode::Esc if app.bottom_pane.slash_popup().is_some() => {
+                        app.bottom_pane.dismiss_slash_popup();
                         app.status = "Command hints dismissed.".to_owned();
                     }
-                    KeyCode::Up if app.slash_popup.is_some() => {
-                        if let Some(popup) = app.slash_popup.as_mut() {
+                    KeyCode::Up if app.bottom_pane.slash_popup().is_some() => {
+                        if let Some(popup) = app.bottom_pane.slash_popup_mut() {
                             popup.select_previous();
                         }
                     }
-                    KeyCode::Down if app.slash_popup.is_some() => {
-                        if let Some(popup) = app.slash_popup.as_mut() {
+                    KeyCode::Down if app.bottom_pane.slash_popup().is_some() => {
+                        if let Some(popup) = app.bottom_pane.slash_popup_mut() {
                             popup.select_next();
                         }
                     }
                     KeyCode::Char('p')
-                        if app.slash_popup.is_some()
+                        if app.bottom_pane.slash_popup().is_some()
                             && key.modifiers.contains(KeyModifiers::CONTROL) =>
                     {
-                        if let Some(popup) = app.slash_popup.as_mut() {
+                        if let Some(popup) = app.bottom_pane.slash_popup_mut() {
                             popup.select_previous();
                         }
                     }
                     KeyCode::Char('n')
-                        if app.slash_popup.is_some()
+                        if app.bottom_pane.slash_popup().is_some()
                             && key.modifiers.contains(KeyModifiers::CONTROL) =>
                     {
-                        if let Some(popup) = app.slash_popup.as_mut() {
+                        if let Some(popup) = app.bottom_pane.slash_popup_mut() {
                             popup.select_next();
                         }
                     }
-                    KeyCode::Tab if app.slash_popup.is_some() => {
+                    KeyCode::Tab if app.bottom_pane.slash_popup().is_some() => {
                         complete_slash_command(&mut app);
                     }
-                    KeyCode::Char('/') if app.slash_popup.is_some() => {
+                    KeyCode::Char('/') if app.bottom_pane.slash_popup().is_some() => {
                         complete_slash_command(&mut app);
                     }
-                    KeyCode::Enter if app.slash_popup.is_some() => {
+                    KeyCode::Enter if app.bottom_pane.slash_popup().is_some() => {
                         accept_slash_command(&mut app);
-                        if let Err(error) = submit_input(&mut client, &mut app, terminal).await {
+                        if let Err(error) =
+                            submit_current_input(&mut client, &mut app, terminal).await
+                        {
                             app.status = format!("Input submit failed: {error}");
                         }
                         if app.should_exit {
@@ -243,17 +252,28 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                             break;
                         }
                     }
-                    KeyCode::Esc if app.input.is_empty() => break,
+                    KeyCode::Esc if app.bottom_pane.is_input_empty() => break,
                     KeyCode::Esc => {
-                        app.input.clear();
-                        app.input_cursor = 0;
+                        app.bottom_pane.clear_input();
                         app.sync_slash_popup();
                     }
                     KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        insert_input(&mut app, '\n');
+                        app.bottom_pane.insert_char('\n');
+                    }
+                    KeyCode::Tab => {
+                        if let Err(error) =
+                            submit_current_input(&mut client, &mut app, terminal).await
+                        {
+                            app.status = format!("Input submit failed: {error}");
+                        }
+                        if app.should_exit {
+                            break;
+                        }
                     }
                     KeyCode::Enter => {
-                        if let Err(error) = submit_input(&mut client, &mut app, terminal).await {
+                        if let Err(error) =
+                            submit_current_input(&mut client, &mut app, terminal).await
+                        {
                             app.status = format!("Input submit failed: {error}");
                         }
                         if app.should_exit {
@@ -261,25 +281,25 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                         }
                     }
                     KeyCode::Backspace => {
-                        backspace_input(&mut app);
+                        app.bottom_pane.backspace();
                     }
                     KeyCode::Delete => {
-                        delete_input(&mut app);
+                        app.bottom_pane.delete();
                     }
                     KeyCode::Left => {
-                        move_input_cursor_left(&mut app);
+                        app.bottom_pane.move_cursor_left();
                     }
                     KeyCode::Right => {
-                        move_input_cursor_right(&mut app);
+                        app.bottom_pane.move_cursor_right();
                     }
                     KeyCode::Home => {
-                        move_input_cursor_to_line_start(&mut app);
+                        app.bottom_pane.move_cursor_to_line_start();
                     }
                     KeyCode::End => {
-                        move_input_cursor_to_line_end(&mut app);
+                        app.bottom_pane.move_cursor_to_line_end();
                     }
                     KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        insert_input(&mut app, character);
+                        app.bottom_pane.insert_char(character);
                     }
                     _ => {}
                 },
@@ -289,7 +309,7 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                     {
                         picker.push_api_key_text(&pasted);
                     } else if app.model_picker.is_none() && app.translator_picker.is_none() {
-                        insert_input_text(&mut app, &pasted);
+                        app.bottom_pane.insert_text(&pasted);
                     }
                 }
                 _ => {}
@@ -302,30 +322,9 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
 }
 
 fn complete_slash_command(app: &mut TuiState) {
-    let Some(completion) = app
-        .slash_popup
-        .as_ref()
-        .and_then(SlashCommandPopup::completion_text)
-    else {
-        return;
-    };
-
-    app.input = completion;
-    app.input_cursor = app.input.len();
-    app.sync_slash_popup();
+    app.bottom_pane.complete_slash_command();
 }
 
 fn accept_slash_command(app: &mut TuiState) -> bool {
-    let Some(command) = app
-        .slash_popup
-        .as_ref()
-        .and_then(SlashCommandPopup::selected_command)
-    else {
-        return false;
-    };
-
-    app.input = format!("/{command}");
-    app.input_cursor = app.input.len();
-    app.slash_popup = None;
-    true
+    app.bottom_pane.accept_slash_command()
 }

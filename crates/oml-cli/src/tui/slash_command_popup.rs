@@ -90,14 +90,14 @@ impl SlashCommandPopup {
 pub(crate) fn draw_slash_command_popup(
     frame: &mut Frame<'_>,
     popup_state: &SlashCommandPopup,
-    composer_area: Rect,
+    input_area: Rect,
 ) {
-    let width = composer_area.width.min(64);
+    let width = input_area.width.min(64);
     let filtered = popup_state.filtered();
     let visible_len = filtered.len().min(8) as u16;
     let height = visible_len.saturating_add(2).max(3);
-    let x = composer_area.x;
-    let y = composer_area.y.saturating_sub(height);
+    let x = input_area.x;
+    let y = input_area.y.saturating_sub(height);
     let area = Rect {
         x,
         y,

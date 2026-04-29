@@ -12,17 +12,13 @@
 
 ## Commands
 
-- `/Users/jung/.cargo/bin/cargo fmt` — Rust formatter
-- `/Users/jung/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` — Rust linter, equivalent in role to `imgobot-web`'s `npx eslint . --quiet` quality gate: quiet on success, non-zero exit on warnings/errors
-- `/Users/jung/.cargo/bin/cargo install --path crates/oml-cli --force` — rebuild and replace the global `oh-my-limit` and `oml` executables from the current checkout
+- `scripts/verify-install.sh` — runs Rust formatting, workspace clippy with `-D warnings`, then rebuilds and replaces the global `oh-my-limit` and `oml` executables from the current checkout
 
 ## Definition of Done
 
-For any turn that changes Rust source, CLI behavior, or this repository's agent instructions, run these exactly once before the final response:
+For any turn that changes Rust source, CLI behavior, or this repository's agent instructions, run this exactly once before the final response:
 
-1. `/Users/jung/.cargo/bin/cargo fmt`
-2. `/Users/jung/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings`
-3. `/Users/jung/.cargo/bin/cargo install --path crates/oml-cli --force`
+1. `scripts/verify-install.sh`
 
 Report any skipped command with the concrete reason. Do not use `cargo check -p oml-cli`; the package name is `oh-my-limit`.
 

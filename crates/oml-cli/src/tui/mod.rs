@@ -1012,10 +1012,10 @@ fn draw_limit_bar(frame: &mut Frame<'_>, app: &TuiState, area: Rect) {
 
 fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, percent: Option<u16>) {
     let percent = percent.map(|percent| percent.min(100));
-    let label = percent
-        .map(|percent| format!("{title} {percent}%"))
-        .unwrap_or_else(|| format!("{title} pending"));
     let remaining_percent = percent.map(|percent| 100 - percent).unwrap_or_default();
+    let title = percent
+        .map(|_| format!("{title} {remaining_percent}%"))
+        .unwrap_or_else(|| format!("{title} pending"));
     let gauge = Gauge::default()
         .block(Block::default().title(title).borders(Borders::ALL))
         .gauge_style(
@@ -1025,7 +1025,7 @@ fn draw_limit_gauge(frame: &mut Frame<'_>, area: Rect, title: &'static str, perc
                 .add_modifier(Modifier::BOLD),
         )
         .percent(remaining_percent)
-        .label(Span::raw(label));
+        .label(Span::raw(""));
     frame.render_widget(gauge, area);
 }
 

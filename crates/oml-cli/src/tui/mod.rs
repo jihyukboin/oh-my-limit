@@ -19,7 +19,10 @@ use composer::{
     move_input_cursor_to_line_end, move_input_cursor_to_line_start,
 };
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        KeyModifiers,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -28,7 +31,7 @@ use model_picker::ModelPicker;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use slash_command_popup::SlashCommandPopup;
 use tokio::runtime::Runtime;
-use translator_picker::TranslatorPicker;
+use translator_picker::{TranslatorPicker, TranslatorPickerAction};
 use view::draw;
 
 const TICK_RATE: Duration = Duration::from_millis(50);
@@ -38,14 +41,18 @@ pub fn run() -> io::Result<()> {
     enable_raw_mode()?;
 
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let result = run_with_terminal(&mut terminal);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -116,14 +123,26 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                         }
                     }
                     KeyCode::Enter if app.translator_picker.is_some() => {
+                        let is_api_key_input = app
+                            .translator_picker
+                            .as_ref()
+                            .is_some_and(TranslatorPicker::is_api_key_input);
                         if let Some(selection) = app
                             .translator_picker
                             .as_mut()
                             .and_then(TranslatorPicker::accept)
-                            && let Err(error) =
-                                apply_translator_selection(&mut app, selection).await
                         {
-                            app.status = error;
+                            if matches!(&selection, TranslatorPickerAction::TestOpenAi { .. }) {
+                                app.status = "Testing OpenAI API key...".to_owned();
+                                terminal.draw(|frame| draw(frame, &app))?;
+                            }
+                            if let Err(error) =
+                                apply_translator_selection(&mut app, selection).await
+                            {
+                                app.status = error;
+                            }
+                        } else if is_api_key_input {
+                            app.status = "OpenAI API key is required.".to_owned();
                         }
                     }
                     KeyCode::Enter if app.model_picker.is_some() => {
@@ -260,6 +279,13 @@ async fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::
                     }
                     _ => {}
                 },
+                Event::Paste(pasted) => {
+                    if let Some(picker) = app.translator_picker.as_mut()
+                        && picker.is_api_key_input()
+                    {
+                        picker.push_api_key_text(&pasted);
+                    }
+                }
                 _ => {}
             }
         }

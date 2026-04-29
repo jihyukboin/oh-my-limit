@@ -6,8 +6,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
 };
 
-const POPUP_BG: Color = Color::Rgb(24, 24, 24);
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TranslatorProviderSelection {
     Noop,
@@ -19,6 +17,7 @@ pub(crate) enum TranslatorProviderSelection {
 pub(crate) enum TranslatorPickerAction {
     SelectedLocal(TranslatorProviderSelection),
     TestOpenAi { api_key: String },
+    InvalidOpenAiApiKey,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -90,8 +89,14 @@ impl TranslatorPicker {
                 None
             }
             TranslatorPickerStage::OpenAiApiKey { value } => {
-                let api_key = value.trim().to_owned();
-                (!api_key.is_empty()).then_some(TranslatorPickerAction::TestOpenAi { api_key })
+                let api_key = normalized_api_key(value);
+                if api_key.is_empty() {
+                    None
+                } else if api_key.starts_with("sk-") && api_key.len() >= 40 {
+                    Some(TranslatorPickerAction::TestOpenAi { api_key })
+                } else {
+                    Some(TranslatorPickerAction::InvalidOpenAiApiKey)
+                }
             }
         }
     }
@@ -130,6 +135,12 @@ impl TranslatorPicker {
         }
     }
 
+    pub(crate) fn push_api_key_text(&mut self, text: &str) {
+        if let TranslatorPickerStage::OpenAiApiKey { value } = &mut self.stage {
+            value.extend(text.chars().filter(|character| !character.is_control()));
+        }
+    }
+
     pub(crate) fn pop_api_key_char(&mut self) {
         if let TranslatorPickerStage::OpenAiApiKey { value } = &mut self.stage {
             value.pop();
@@ -152,8 +163,7 @@ pub(crate) fn draw_translator_picker(frame: &mut Frame<'_>, picker: &TranslatorP
         .title("Translator")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
-        .padding(Padding::new(1, 1, 0, 0))
-        .style(Style::default().bg(POPUP_BG));
+        .padding(Padding::new(1, 1, 0, 0));
     frame.render_widget(Clear, area);
     frame.render_widget(popup.clone(), area);
     let area = popup.inner(area);
@@ -175,14 +185,12 @@ pub(crate) fn draw_translator_picker(frame: &mut Frame<'_>, picker: &TranslatorP
         state.select(Some(picker.selected));
         let list = List::new(items)
             .highlight_symbol("› ")
-            .highlight_style(Style::default().fg(Color::Cyan).bg(POPUP_BG))
-            .style(Style::default().bg(POPUP_BG));
+            .highlight_style(Style::default().fg(Color::Cyan));
         frame.render_stateful_widget(list, rows[1], &mut state);
     }
 
     frame.render_widget(
-        Paragraph::new("Enter confirm · Esc back")
-            .style(Style::default().fg(Color::Gray).bg(POPUP_BG)),
+        Paragraph::new("Enter confirm · Esc back").style(Style::default().fg(Color::Gray)),
         rows[2],
     );
 }
@@ -213,7 +221,6 @@ fn header(picker: &TranslatorPicker) -> Paragraph<'static> {
         Line::from(Span::styled(subtitle, Style::default().fg(Color::Gray))),
         Line::from(""),
     ])
-    .style(Style::default().bg(POPUP_BG))
 }
 
 fn header_height(_picker: &TranslatorPicker) -> u16 {
@@ -255,11 +262,10 @@ fn api_key_input(picker: &TranslatorPicker) -> Paragraph<'static> {
         Line::from(masked),
         Line::from(""),
         Line::from(Span::styled(
-            "The raw key is kept in memory for this TUI session.",
+            "Whitespace is ignored. The raw key is kept in memory for this TUI session.",
             Style::default().fg(Color::Gray),
         )),
     ])
-    .style(Style::default().bg(POPUP_BG))
 }
 
 fn row(name: &'static str, description: &'static str) -> ListItem<'static> {
@@ -281,4 +287,11 @@ fn modal_rect(area: Rect) -> Rect {
         width,
         height,
     }
+}
+
+fn normalized_api_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect()
 }

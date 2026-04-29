@@ -109,8 +109,7 @@ pub(crate) fn draw_slash_command_popup(
         .title("Commands")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
-        .padding(Padding::new(1, 1, 0, 0))
-        .style(Style::default().bg(Color::Rgb(24, 24, 24)));
+        .padding(Padding::new(1, 1, 0, 0));
     frame.render_widget(Clear, area);
     frame.render_widget(popup_window.clone(), area);
     let area = popup_window.inner(area);
@@ -134,8 +133,7 @@ pub(crate) fn draw_slash_command_popup(
     }
     let list = List::new(items)
         .highlight_symbol("› ")
-        .highlight_style(Style::default().fg(Color::Cyan).bg(Color::Rgb(24, 24, 24)))
-        .style(Style::default().bg(Color::Rgb(24, 24, 24)));
+        .highlight_style(Style::default().fg(Color::Cyan));
     frame.render_stateful_widget(list, area, &mut state);
 }
 

@@ -341,6 +341,11 @@ pub(super) async fn apply_translator_selection(
 ) -> Result<(), String> {
     let test_on_apply = matches!(selection, TranslatorPickerAction::TestOpenAi { .. });
     match selection {
+        TranslatorPickerAction::InvalidOpenAiApiKey => {
+            app.status =
+                "OpenAI API key looks incomplete. Paste the full key and press Enter.".to_owned();
+            return Ok(());
+        }
         TranslatorPickerAction::SelectedLocal(selection) => {
             app.config.translation.provider = match selection {
                 TranslatorProviderSelection::Noop => TranslationProviderKind::Noop.as_str(),
@@ -355,30 +360,33 @@ pub(super) async fn apply_translator_selection(
             app.openai_api_key = None;
         }
         TranslatorPickerAction::TestOpenAi { api_key } => {
-            app.config.translation.provider = TranslationProviderKind::OpenAi.as_str().to_owned();
-            app.config.privacy.remote_translation_allowed = true;
-            app.config.translation.model = app
+            let model = app
                 .config
                 .translation
                 .model
                 .clone()
                 .or_else(|| Some("gpt-4.1-mini".to_owned()));
-            app.config.translation.base_url = app
+            let base_url = app
                 .config
                 .translation
                 .base_url
                 .clone()
                 .or_else(|| Some("https://api.openai.com/v1".to_owned()));
+            test_openai_api_key(app, api_key.clone(), model.clone(), base_url.clone()).await?;
+
+            app.config.translation.provider = TranslationProviderKind::OpenAi.as_str().to_owned();
+            app.config.privacy.remote_translation_allowed = true;
+            app.config.translation.model = model;
+            app.config.translation.base_url = base_url;
             app.config.translation.api_key_env = None;
             app.openai_api_key = Some(api_key);
         }
     }
 
     if test_on_apply {
-        app.status = "Testing OpenAI API key...".to_owned();
-        let message = test_translator(app).await?;
         save_config(&app.config, &app.config_path)?;
         app.translator_picker = None;
+        let message = "Translator test passed: openai (OpenAI API reachable)".to_owned();
         app.push_system(message.clone());
         app.status = message;
         return Ok(());
@@ -479,6 +487,27 @@ async fn test_translator(app: &mut TuiState) -> Result<String, String> {
         health.provider.as_str(),
         health.message
     ))
+}
+
+async fn test_openai_api_key(
+    app: &TuiState,
+    api_key: String,
+    model: Option<String>,
+    base_url: Option<String>,
+) -> Result<(), String> {
+    let translator = build_translator(TranslatorConfig {
+        provider: TranslationProviderKind::OpenAi,
+        model,
+        base_url,
+        api_key: Some(api_key),
+        timeout: Duration::from_millis(app.config.translation.timeout_ms),
+    });
+
+    translator
+        .health_check()
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("Translator test failed: {error}"))
 }
 
 fn translator_config(app: &TuiState) -> anyhow::Result<TranslatorConfig> {

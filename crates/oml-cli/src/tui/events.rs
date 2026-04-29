@@ -1,0 +1,192 @@
+use oml_codex_appserver::client::AppServerClient;
+use serde_json::Value;
+use tokio::time;
+
+use super::{
+    EVENT_DRAIN_TIMEOUT,
+    app::{PendingApproval, TuiState},
+    limits::{rate_limit_summary, rate_limit_usage},
+};
+
+pub(super) async fn drain_app_server_events(client: &mut AppServerClient, app: &mut TuiState) {
+    loop {
+        match time::timeout(EVENT_DRAIN_TIMEOUT, client.next_message()).await {
+            Ok(Ok(message)) => handle_app_server_message(app, &message),
+            Ok(Err(error)) => {
+                app.status = format!("Codex app-server error: {error}");
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+fn handle_app_server_message(app: &mut TuiState, message: &Value) {
+    if let Some(approval) = pending_approval_from_message(message) {
+        app.status =
+            "Approval required. Type /approve, /approve-session, /deny, or /cancel.".to_owned();
+        app.push_system(format!(
+            "Approval required:\n{}\n\nType /approve, /approve-session, /deny, or /cancel.",
+            approval.summary
+        ));
+        app.pending_approval = Some(approval);
+        return;
+    }
+
+    match message.get("method").and_then(Value::as_str) {
+        Some("item/agentMessage/delta") => {
+            let params = message.get("params").unwrap_or(&Value::Null);
+            if belongs_to_active_turn(app, params)
+                && let Some(delta) = params.get("delta").and_then(Value::as_str)
+            {
+                app.append_assistant_delta(delta);
+            }
+        }
+        Some("item/completed") => {
+            let params = message.get("params").unwrap_or(&Value::Null);
+            if belongs_to_active_turn(app, params)
+                && let Some(text) = completed_agent_answer(params)
+            {
+                app.replace_last_assistant_message(text);
+            }
+        }
+        Some("turn/completed") => {
+            let params = message.get("params").unwrap_or(&Value::Null);
+            let turn_id = params
+                .get("turn")
+                .and_then(|turn| turn.get("id"))
+                .and_then(Value::as_str);
+
+            if turn_id == app.active_turn_id.as_deref() {
+                app.active_turn_id = None;
+                app.status = "Ready.".to_owned();
+            }
+        }
+        Some("thread/tokenUsage/updated") => {
+            app.usage = token_usage_summary(message.get("params").unwrap_or(&Value::Null));
+        }
+        Some("account/rateLimits/updated") => {
+            let params = message.get("params").unwrap_or(&Value::Null);
+            if let Some(rate_limits) = rate_limit_usage(params) {
+                app.rate_limits = rate_limits;
+            }
+            app.status = rate_limit_summary(params).unwrap_or_else(|| app.status.clone());
+        }
+        Some("error") => {
+            app.status = format!("Codex error: {}", message["params"]);
+        }
+        _ => {}
+    }
+}
+
+fn pending_approval_from_message(message: &Value) -> Option<PendingApproval> {
+    let id = message.get("id")?.clone();
+    let method = message.get("method")?.as_str()?.to_owned();
+    let params = message.get("params").unwrap_or(&Value::Null);
+
+    match method.as_str() {
+        "item/commandExecution/requestApproval" => Some(PendingApproval {
+            id,
+            method,
+            summary: command_approval_summary(params),
+        }),
+        "item/fileChange/requestApproval" => Some(PendingApproval {
+            id,
+            method,
+            summary: file_approval_summary(params),
+        }),
+        "execCommandApproval" => Some(PendingApproval {
+            id,
+            method,
+            summary: legacy_exec_approval_summary(params),
+        }),
+        "applyPatchApproval" => Some(PendingApproval {
+            id,
+            method,
+            summary: format!("Patch approval requested: {params}"),
+        }),
+        _ => None,
+    }
+}
+
+fn command_approval_summary(params: &Value) -> String {
+    let command = params
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("(command unavailable)");
+    let cwd = params
+        .get("cwd")
+        .and_then(Value::as_str)
+        .unwrap_or("(cwd unknown)");
+    let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+
+    if reason.is_empty() {
+        format!("command: {command}\ncwd: {cwd}")
+    } else {
+        format!("command: {command}\ncwd: {cwd}\nreason: {reason}")
+    }
+}
+
+fn file_approval_summary(params: &Value) -> String {
+    let item_id = params
+        .get("itemId")
+        .and_then(Value::as_str)
+        .unwrap_or("(item unknown)");
+    let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+    let grant_root = params
+        .get("grantRoot")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    format!("file change item: {item_id}\nreason: {reason}\ngrant root: {grant_root}")
+}
+
+fn legacy_exec_approval_summary(params: &Value) -> String {
+    let cwd = params
+        .get("cwd")
+        .and_then(Value::as_str)
+        .unwrap_or("(cwd unknown)");
+    let command = params
+        .get("command")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_else(|| "(command unavailable)".to_owned());
+
+    format!("command: {command}\ncwd: {cwd}")
+}
+
+fn belongs_to_active_turn(app: &TuiState, params: &Value) -> bool {
+    params.get("turnId").and_then(Value::as_str) == app.active_turn_id.as_deref()
+}
+
+fn completed_agent_answer(params: &Value) -> Option<String> {
+    let item = params.get("item")?;
+
+    if item.get("type").and_then(Value::as_str) != Some("agentMessage") {
+        return None;
+    }
+
+    let phase = item.get("phase").and_then(Value::as_str);
+    if phase.is_some_and(|phase| phase != "final_answer") {
+        return None;
+    }
+
+    item.get("text").and_then(Value::as_str).map(str::to_owned)
+}
+
+fn token_usage_summary(params: &Value) -> Option<String> {
+    let total = params.get("tokenUsage")?.get("total")?;
+    let input = total.get("inputTokens").and_then(Value::as_u64)?;
+    let output = total.get("outputTokens").and_then(Value::as_u64)?;
+    let cached = total
+        .get("cachedInputTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    Some(format!("input {input} · cached {cached} · output {output}"))
+}
